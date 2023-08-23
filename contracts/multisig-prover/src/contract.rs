@@ -4,6 +4,7 @@ use cosmwasm_std::{
     to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Reply, Response, StdResult,
 };
 
+use error_stack::{IntoReport, Result, ResultExt};
 use std::str::FromStr;
 
 use connection_router::types::ChainName;
@@ -26,10 +27,26 @@ pub fn instantiate(
     _info: MessageInfo,
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
-    let admin = deps.api.addr_validate(&msg.admin_address)?;
-    let gateway = deps.api.addr_validate(&msg.gateway_address)?;
-    let multisig = deps.api.addr_validate(&msg.multisig_address)?;
-    let service_registry = deps.api.addr_validate(&msg.service_registry_address)?;
+    let admin = deps
+        .api
+        .addr_validate(&msg.admin_address)
+        .into_report()
+        .change_context(ContractError::Std)?;
+    let gateway = deps
+        .api
+        .addr_validate(&msg.gateway_address)
+        .into_report()
+        .change_context(ContractError::Std)?;
+    let multisig = deps
+        .api
+        .addr_validate(&msg.multisig_address)
+        .into_report()
+        .change_context(ContractError::Std)?;
+    let service_registry = deps
+        .api
+        .addr_validate(&msg.service_registry_address)
+        .into_report()
+        .change_context(ContractError::Std)?;
 
     let config = Config {
         admin,
@@ -43,7 +60,10 @@ pub fn instantiate(
             .map_err(|_| ContractError::InvalidChainName)?,
     };
 
-    CONFIG.save(deps.storage, &config)?;
+    CONFIG
+        .save(deps.storage, &config)
+        .into_report()
+        .change_context(ContractError::Std)?;
 
     Ok(Response::default())
 }
@@ -58,9 +78,12 @@ pub fn execute(
     match msg {
         ExecuteMsg::ConstructProof { message_ids } => execute::construct_proof(deps, message_ids),
         ExecuteMsg::RotateSnapshot { pub_keys, key_id } => {
-            let config = CONFIG.load(deps.storage)?;
+            let config = CONFIG
+                .load(deps.storage)
+                .into_report()
+                .change_context(ContractError::Std)?;
             if config.admin != info.sender {
-                return Err(ContractError::Unauthorized);
+                return Err(ContractError::Unauthorized).into_report();
             }
 
             execute::rotate_snapshot(deps, env, config, pub_keys, key_id)
@@ -93,6 +116,7 @@ mod test {
         Addr, Fraction, HexBinary, Uint256,
     };
     use cw_multi_test::{AppResponse, Executor};
+    use error_stack::IntoReportCompat;
     use ethabi::{ParamType, Token};
 
     use crate::{
@@ -127,12 +151,15 @@ mod test {
         };
 
         let msg = ExecuteMsg::RotateSnapshot { pub_keys, key_id };
-        test_case.app.execute_contract(
-            test_case.admin.clone(),
-            test_case.prover_address.clone(),
-            &msg,
-            &[],
-        )
+        test_case
+            .app
+            .execute_contract(
+                test_case.admin.clone(),
+                test_case.prover_address.clone(),
+                &msg,
+                &[],
+            )
+            .into_report()
     }
 
     fn execute_construct_proof(
@@ -148,12 +175,15 @@ mod test {
         };
 
         let msg = ExecuteMsg::ConstructProof { message_ids };
-        test_case.app.execute_contract(
-            Addr::unchecked(RELAYER),
-            test_case.prover_address.clone(),
-            &msg,
-            &[],
-        )
+        test_case
+            .app
+            .execute_contract(
+                Addr::unchecked(RELAYER),
+                test_case.prover_address.clone(),
+                &msg,
+                &[],
+            )
+            .into_report()
     }
 
     fn query_get_proof(

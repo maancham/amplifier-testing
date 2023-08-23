@@ -3,6 +3,7 @@ use std::str::FromStr;
 use connection_router::msg::Message;
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{HexBinary, Uint256};
+use error_stack::{IntoReport, Report, Result, ResultExt};
 use ethabi::{ethereum_types, short_signature, ParamType, Token};
 use k256::{elliptic_curve::sec1::ToEncodedPoint, PublicKey};
 use multisig::msg::Signer;
@@ -16,27 +17,22 @@ use crate::{
 const GATEWAY_EXECUTE_FUNCTION_NAME: &str = "execute";
 
 impl TryFrom<Message> for Command {
-    type Error = ContractError;
+    type Error = Report<ContractError>;
 
-    fn try_from(msg: Message) -> Result<Self, Self::Error> {
+    fn try_from(msg: Message) -> core::result::Result<Self, Self::Error> {
         Ok(Command {
             ty: CommandType::ApproveContractCall, // TODO: this would change when other command types are supported
             params: command_params(
                 msg.source_chain,
                 msg.source_address,
-                ethereum_types::Address::from_str(&msg.destination_address).map_err(|e| {
-                    ContractError::InvalidMessage {
-                        reason: format!("destination_address is not a valid EVM address: {}", e),
-                    }
-                })?,
-                msg.payload_hash.as_slice().try_into().map_err(|e| {
-                    ContractError::InvalidMessage {
-                        reason: format!(
-                            "payload_hash length is not a valid keccak256 hash length: {}",
-                            e
-                        ),
-                    }
-                })?,
+                ethereum_types::Address::from_str(&msg.destination_address)
+                    .into_report()
+                    .change_context(ContractError::InvalidMessage)?,
+                msg.payload_hash
+                    .as_slice()
+                    .try_into()
+                    .into_report()
+                    .change_context(ContractError::InvalidMessage)?,
             ),
             id: command_id(msg.id),
         })
@@ -44,9 +40,9 @@ impl TryFrom<Message> for Command {
 }
 
 impl TryFrom<Signer> for Operator {
-    type Error = ContractError;
+    type Error = Report<ContractError>;
 
-    fn try_from(signer: Signer) -> Result<Self, Self::Error> {
+    fn try_from(signer: Signer) -> core::result::Result<Self, Self::Error> {
         Ok(Self {
             address: evm_address((&signer.pub_key).into())?,
             weight: signer.weight,
@@ -182,10 +178,9 @@ impl Data {
 }
 
 fn evm_address(pub_key: &[u8]) -> Result<HexBinary, ContractError> {
-    let pub_key =
-        PublicKey::from_sec1_bytes(pub_key).map_err(|e| ContractError::InvalidPublicKey {
-            reason: e.to_string(),
-        })?;
+    let pub_key = PublicKey::from_sec1_bytes(pub_key)
+        .into_report()
+        .change_context(ContractError::InvalidPublicKey)?;
     let pub_key = pub_key.to_encoded_point(false);
 
     Ok(Keccak256::digest(&pub_key.as_bytes()[1..]).as_slice()[12..].into())
@@ -332,11 +327,10 @@ mod test {
         router_message.destination_address = "invalid".into();
 
         let res = Command::try_from(router_message.to_owned());
+
         assert_eq!(
-            res.unwrap_err(),
-            ContractError::InvalidMessage {
-                reason: "destination_address is not a valid EVM address: invalid character: i at index 0".into()
-            }
+            res.unwrap_err().current_context(),
+            &ContractError::InvalidMessage
         );
     }
 
@@ -348,13 +342,10 @@ mod test {
                 .unwrap();
 
         let res = Command::try_from(router_message.to_owned());
+
         assert_eq!(
-            res.unwrap_err(),
-            ContractError::InvalidMessage {
-                reason:
-                    "payload_hash length is not a valid keccak256 hash length: could not convert slice to array"
-                        .into()
-            }
+            res.unwrap_err().current_context(),
+            &ContractError::InvalidMessage
         );
     }
 

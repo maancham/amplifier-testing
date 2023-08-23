@@ -49,6 +49,8 @@ axelar-wasm-std = { workspace = true }
 k256 = { version = "0.13.1", features = ["ecdsa"] }
 service-registry = { workspace = true, features = ["library"] }
 gateway = { workspace = true, features = ["library"]}
+error-stack = {version = "0.3.1", features = ["anyhow"]}
+rustc-hex = { version = "2.1.0" }
 
 [dev-dependencies]
 cw-multi-test = "0.15.1"
