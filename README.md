@@ -54,15 +54,15 @@ P --"GetSigningSession(session_id)"-->M
 
 # Event Flow
 
-In the below diagram, the blue box represents the protocol. All messages flowing into, out of or within the blue box
-are part of the protocol. All components within the blue box are on chain. All components outside of the blue box are off chain.
+In the below diagram, the yellow box represents the protocol. All messages flowing into, out of or within the yellow box
+are part of the protocol. All components within the yellow box are on chain. All components outside of the yellow box are off chain.
 
 ## Voting Contract Flows
 Incoming Message Flow
 ```mermaid
 sequenceDiagram
     participant Relayer
-    box Blue Protocol
+    box Yellow Protocol
     participant IncomingGateway
     participant Router
     participant Verifier
@@ -99,7 +99,7 @@ Outgoing Message Flow
 ```mermaid
 sequenceDiagram
     participant Relayer
-    box Blue Protocol
+    box Yellow Protocol
     participant OutgoingGateway
     participant Router
     participant Prover
