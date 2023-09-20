@@ -133,7 +133,7 @@ query the service registry for an updated snapshot.
 ## Contract Overview
 
 ### Connection Router
-[`connection-router`](./contracts/connection-router)  is the way messages are passed between different gateways. The router has methods for registering new chains and gateways, updating the address of the registered gateway, and freezing chains (preventing message flow). These methods are only callable by the router admin. Messages are passed to the router from registered gateways, and the router passes those messages to the appropriate gateway based on each message's destination chain.
+[`connection-router`](./contracts/connection-router)  is the way messages are passed between different gateways. The router has methods for registering new chains and gateways, updating the address of the registered gateway, and freezing chains (preventing message flow). Methods for registering a new chain and upgrading a gateway can only be called by a governance address. Methods for freezing and unfreezing a chain are only callable by the router admin. Messages are passed to the router from registered gateways, and the router passes those messages to the appropriate gateway based on each message's destination chain.
 
 ### Gateway
  [`gateway`](./contracts/gateway) is the entry point for incoming messages. Each gateway corresponds to a single connected external chain. Messages are passed to the gateway in a permissionless manner. For each message passed to the gateway, the gateway checks whether the message has been verified by calling into a linked verifier contract. For each verified message, the gateway passes the message to the router.
