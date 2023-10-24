@@ -35,4 +35,10 @@ pub enum ContractError {
 
     #[error("specified block has already passed")]
     BlockHeightInPast,
+
+    #[error("rewards pool balance insufficient")]
+    PoolBalanceInsufficient,
+
+    #[error("rewards rate is too low")]
+    RateTooLow,
 }

@@ -1,14 +1,16 @@
+use axelar_wasm_std::nonempty;
+use cosmwasm_std::{Addr, Fraction, Uint256};
 use error_stack::Result;
 use std::collections::HashMap;
 
-use axelar_wasm_std::nonempty;
-use cosmwasm_std::{Addr, Uint256};
 
 use crate::{
     error::ContractError,
     msg::RewardsParams,
     state::{Epoch, EpochTally, Event, RewardsPool, Store, StoredParams},
 };
+
+const DEFAULT_EPOCHS_TO_PROCESS: u64 = 10;
 
 pub struct Contract<S>
 where
@@ -42,7 +44,6 @@ where
         Ok(Epoch {
             epoch_num,
             block_height_started,
-            rewards: epoch.rewards,
         })
     }
 
@@ -87,11 +88,70 @@ where
 
     pub fn process_rewards(
         &mut self,
-        _contract: Addr,
-        _block_height: u64,
-        _count: Option<u64>,
+        contract: Addr,
+        block_height: u64,
+        count: Option<u64>,
     ) -> Result<HashMap<Addr, Uint256>, ContractError> {
-        todo!()
+        let count = count.unwrap_or(DEFAULT_EPOCHS_TO_PROCESS);
+        let cur_epoch = self.get_current_epoch(block_height)?;
+        let start = self
+            .store
+            .load_rewards_watermark(contract.clone())?
+            .map_or(0, |epoch| epoch + 1);
+        let mut epoch_to_process = start;
+        let mut to_reward = HashMap::new();
+        while epoch_to_process < cur_epoch.epoch_num - 2 && epoch_to_process < start + count {
+            let rewards = self.process_rewards_for_epoch(contract.clone(), epoch_to_process)?;
+            to_reward.extend(rewards);
+            epoch_to_process += 1;
+        }
+        self.store
+            .save_rewards_watermark(contract, epoch_to_process - 1)?;
+        Ok(to_reward)
+    }
+
+    pub fn process_rewards_for_epoch(
+        &mut self,
+        contract: Addr,
+        epoch_num: u64,
+    ) -> Result<HashMap<Addr, Uint256>, ContractError> {
+        let tally = self.store.load_epoch_tally(contract.clone(), epoch_num)?;
+        if tally.is_none() {
+            return Ok(HashMap::new());
+        }
+        let tally = tally.unwrap();
+        let params = tally.rewards_params;
+
+        let cutoff = tally.event_count * u64::from(params.participation_threshold.numerator())
+            / u64::from(params.participation_threshold.denominator());
+        let mut to_reward = vec![];
+        for (worker, participated) in &tally.participation {
+            if *participated >= cutoff {
+                to_reward.push(worker.clone());
+            }
+        }
+
+        let pool = self.store.load_rewards_pool(contract.clone())?;
+        if pool.is_none() {
+            return Ok(HashMap::new());
+        }
+        let pool = pool.unwrap();
+        let rate: cosmwasm_std::Uint256 = params.rewards_per_epoch.into();
+        if pool.balance < rate {
+            return Err(ContractError::PoolBalanceInsufficient.into());
+        }
+        if rate < Uint256::from_u128(to_reward.len() as u128) {
+            return Err(ContractError::RateTooLow.into());
+        }
+        self.store.save_rewards_pool(&RewardsPool {
+            balance: pool.balance - rate,
+            ..pool
+        })?;
+        let rewards_per_worker = rate.multiply_ratio(1u32, to_reward.len() as u32);
+        Ok(to_reward
+            .into_iter()
+            .map(|worker| (worker, rewards_per_worker))
+            .collect())
     }
 
     pub fn update_params(
@@ -112,13 +172,9 @@ where
             Epoch {
                 block_height_started: block_height,
                 epoch_num: cur_epoch.epoch_num + 1,
-                rewards: new_params.rewards_per_epoch,
             }
         } else {
-            Epoch {
-                rewards: new_params.rewards_per_epoch,
-                ..cur_epoch
-            }
+            Epoch { ..cur_epoch }
         };
         self.store.save_params(&StoredParams {
             params: new_params,
@@ -734,7 +790,6 @@ mod test {
         let current_epoch = Epoch {
             epoch_num: cur_epoch_num,
             block_height_started,
-            rewards: rewards_per_epoch.clone(),
         };
 
         let stored_params = StoredParams {
