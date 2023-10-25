@@ -3,7 +3,6 @@ use cosmwasm_std::{Addr, Fraction, Uint256};
 use error_stack::Result;
 use std::collections::HashMap;
 
-
 use crate::{
     error::ContractError,
     msg::RewardsParams,
@@ -54,7 +53,7 @@ where
         contract_addr: Addr,
         block_height: u64,
     ) -> Result<(), ContractError> {
-        let cur_epoch = self.get_current_epoch(block_height)?;
+        let cur_epoch = self.current_epoch(block_height)?;
 
         let event = self
             .store
@@ -76,7 +75,11 @@ where
             None => self
                 .store
                 .load_epoch_tally(contract_addr.clone(), cur_epoch.epoch_num)?
-                .unwrap_or(EpochTally::new(contract_addr, cur_epoch)) // first event in this epoch
+                .unwrap_or(EpochTally::new(
+                    contract_addr,
+                    cur_epoch,
+                    self.store.load_params().params,
+                )) // first event in this epoch
                 .increment_event_count(),
         }
         .record_participation(worker);
@@ -100,13 +103,22 @@ where
             .map_or(0, |epoch| epoch + 1);
         let mut epoch_to_process = start;
         let mut to_reward = HashMap::new();
-        while epoch_to_process < cur_epoch.epoch_num - 2 && epoch_to_process < start + count {
+        while epoch_to_process < cur_epoch.epoch_num - 1 && epoch_to_process < start + count {
             let rewards = self.process_rewards_for_epoch(contract.clone(), epoch_to_process)?;
-            to_reward.extend(rewards);
+            to_reward = rewards.iter().fold(to_reward, |mut rewards, (addr, amt)| {
+                let mut new_amt = amt.clone();
+                if let Some(cur_amt) = rewards.get(addr) {
+                    new_amt += cur_amt;
+                }
+                rewards.insert(addr.clone(), new_amt);
+                rewards
+            });
             epoch_to_process += 1;
         }
-        self.store
-            .save_rewards_watermark(contract, epoch_to_process - 1)?;
+        if epoch_to_process != start {
+            self.store
+                .save_rewards_watermark(contract, epoch_to_process - 1)?;
+        }
         Ok(to_reward)
     }
 
@@ -226,7 +238,7 @@ mod test {
 
     /// Tests that the current epoch is computed correctly when the expected epoch is the same as the stored epoch
     #[test]
-    fn get_current_epoch_same_epoch_is_idempotent() {
+    fn current_epoch_same_epoch_is_idempotent() {
         let cur_epoch_num = 1u64;
         let block_height_started = 250u64;
         let epoch_duration = 100u64;
@@ -235,9 +247,7 @@ mod test {
         assert_eq!(new_epoch.epoch_num, cur_epoch_num);
         assert_eq!(new_epoch.block_height_started, block_height_started);
 
-        let new_epoch = contract
-            .current_epoch(block_height_started + 1)
-            .unwrap();
+        let new_epoch = contract.current_epoch(block_height_started + 1).unwrap();
         assert_eq!(new_epoch.epoch_num, cur_epoch_num);
         assert_eq!(new_epoch.block_height_started, block_height_started);
 
@@ -250,7 +260,7 @@ mod test {
 
     /// Tests that the current epoch is computed correctly when the expected epoch is different than the stored epoch
     #[test]
-    fn get_current_epoch_different_epoch() {
+    fn current_epoch_different_epoch() {
         let cur_epoch_num = 1u64;
         let block_height_started = 250u64;
         let epoch_duration = 100u64;
@@ -368,7 +378,7 @@ mod test {
                 .unwrap();
         }
 
-        let cur_epoch = contract.get_current_epoch(height_at_epoch_end).unwrap();
+        let cur_epoch = contract.current_epoch(height_at_epoch_end).unwrap();
         assert_ne!(starting_epoch_num + 1, cur_epoch.epoch_num);
 
         let tally = contract
@@ -710,11 +720,197 @@ mod test {
         }
     }
 
+    #[test]
+    fn distribute_rewards_participation_threshold() {
+        let cur_epoch_num = 0u64;
+        let block_height_started = 0u64;
+        let epoch_duration = 1000u64;
+        let rewards_per_epoch = 100u128;
+        let participation_threshold = (8, 10);
+
+        let mut contract = setup_with_params(
+            cur_epoch_num,
+            block_height_started,
+            epoch_duration,
+            rewards_per_epoch,
+            participation_threshold,
+        );
+        let workers = vec![
+            (Addr::unchecked("worker1"), 8),
+            (Addr::unchecked("worker2"), 7),
+            (Addr::unchecked("worker3"), 10),
+            (Addr::unchecked("worker4"), 4),
+        ];
+        let contract_addr = Addr::unchecked("worker_contract");
+
+        let event_count = 10;
+        for event in 0..event_count {
+            let event_id = event.to_string() + "event";
+            for (worker, part_count) in workers.clone() {
+                if event < part_count {
+                    let _ = contract.record_participation(
+                        event_id.clone().try_into().unwrap(),
+                        worker.clone(),
+                        contract_addr.clone(),
+                        block_height_started,
+                    );
+                }
+            }
+        }
+
+        let rewards_added = 1000u128;
+        let _ = contract.add_rewards(
+            contract_addr.clone(),
+            Uint256::from(rewards_added).try_into().unwrap(),
+        );
+
+        let rewards_claimed = contract
+            .process_rewards(
+                contract_addr,
+                block_height_started + epoch_duration * 2,
+                None,
+            )
+            .unwrap();
+        assert_eq!(rewards_claimed.len(), 2);
+        for (worker, part_count) in workers {
+            if part_count >= participation_threshold.0 {
+                assert!(rewards_claimed.contains_key(&worker));
+                assert_eq!(
+                    rewards_claimed.get(&worker),
+                    Some(&(rewards_per_epoch / 2).into())
+                )
+            }
+        }
+    }
+
+    #[test]
+    fn distribute_rewards_multiple_epochs() {
+        let cur_epoch_num = 0u64;
+        let block_height_started = 0u64;
+        let epoch_duration = 1000u64;
+        let rewards_per_epoch = 100u128;
+        let participation_threshold = (8, 10);
+
+        let mut contract = setup_with_params(
+            cur_epoch_num,
+            block_height_started,
+            epoch_duration,
+            rewards_per_epoch,
+            participation_threshold,
+        );
+        let worker = Addr::unchecked("worker");
+        let contract_addr = Addr::unchecked("worker_contract");
+
+        for height in block_height_started..block_height_started + epoch_duration * 10 {
+            let event_id = height.to_string() + "event";
+            let _ = contract.record_participation(
+                event_id.try_into().unwrap(),
+                worker.clone(),
+                contract_addr.clone(),
+                height,
+            );
+        }
+
+        let rewards_added = 1000u128;
+        let _ = contract.add_rewards(
+            contract_addr.clone(),
+            Uint256::from(rewards_added).try_into().unwrap(),
+        );
+
+        let rewards_claimed = contract
+            .process_rewards(
+                contract_addr,
+                block_height_started + epoch_duration * 10, // this puts us in epoch 11
+                None,
+            )
+            .unwrap();
+        assert_eq!(rewards_claimed.len(), 1);
+        assert!(rewards_claimed.contains_key(&worker));
+        assert_eq!(
+            rewards_claimed.get(&worker),
+            Some(&(rewards_per_epoch * 9).into())
+        )
+    }
+
+    #[test]
+    fn watermark_and_count() {
+        let cur_epoch_num = 0u64;
+        let block_height_started = 0u64;
+        let epoch_duration = 1000u64;
+        let rewards_per_epoch = 100u128;
+        let participation_threshold = (1, 2);
+
+        let mut contract = setup_with_params(
+            cur_epoch_num,
+            block_height_started,
+            epoch_duration,
+            rewards_per_epoch,
+            participation_threshold,
+        );
+        let worker = Addr::unchecked("worker");
+        let contract_addr = Addr::unchecked("worker_contract");
+
+        for height in block_height_started..block_height_started + epoch_duration * 9 {
+            let event_id = height.to_string() + "event";
+            let _ = contract.record_participation(
+                event_id.try_into().unwrap(),
+                worker.clone(),
+                contract_addr.clone(),
+                height,
+            );
+        }
+
+        let rewards_added = 1000u128;
+        let _ = contract.add_rewards(
+            contract_addr.clone(),
+            Uint256::from(rewards_added).try_into().unwrap(),
+        );
+
+        let rewards_claimed = contract
+            .process_rewards(
+                contract_addr.clone(),
+                block_height_started + epoch_duration * 9, // this puts us in epoch 10
+                Some(5),
+            )
+            .unwrap();
+        assert_eq!(rewards_claimed.len(), 1);
+        assert!(rewards_claimed.contains_key(&worker));
+        assert_eq!(
+            rewards_claimed.get(&worker),
+            Some(&(rewards_per_epoch * 5).into())
+        );
+
+        let rewards_claimed = contract
+            .process_rewards(
+                contract_addr.clone(),
+                block_height_started + epoch_duration * 9, // this puts us in epoch 10
+                None,
+            )
+            .unwrap();
+        assert_eq!(rewards_claimed.len(), 1);
+        assert!(rewards_claimed.contains_key(&worker));
+        assert_eq!(
+            rewards_claimed.get(&worker),
+            Some(&(rewards_per_epoch * 3).into())
+        );
+
+        let rewards_claimed = contract
+            .process_rewards(
+                contract_addr.clone(),
+                block_height_started + epoch_duration * 9, // this puts us in epoch 10
+                None,
+            )
+            .unwrap();
+        assert_eq!(rewards_claimed.len(), 0);
+        assert!(!rewards_claimed.contains_key(&worker));
+    }
+
     fn create_contract(
         params_store: Arc<RwLock<StoredParams>>,
         events_store: Arc<RwLock<HashMap<(String, Addr), Event>>>,
         tally_store: Arc<RwLock<HashMap<(Addr, u64), EpochTally>>>,
         rewards_store: Arc<RwLock<HashMap<Addr, RewardsPool>>>,
+        watermark_store: Arc<RwLock<HashMap<Addr, u64>>>,
     ) -> Contract<state::MockStore> {
         let mut store = state::MockStore::new();
         let params_store_cloned = params_store.clone();
@@ -765,6 +961,21 @@ mod test {
             rewards_store.insert(pool.contract.clone(), pool.clone());
             Ok(())
         });
+
+        let watermark_store_cloned = watermark_store.clone();
+        store
+            .expect_load_rewards_watermark()
+            .returning(move |contract| {
+                let watermark_store = watermark_store_cloned.read().unwrap();
+                Ok(watermark_store.get(&contract).cloned())
+            });
+        store
+            .expect_save_rewards_watermark()
+            .returning(move |contract, epoch_num| {
+                let mut watermark_store = watermark_store.write().unwrap();
+                watermark_store.insert(contract, epoch_num);
+                Ok(())
+            });
         Contract { store }
     }
 
@@ -773,8 +984,15 @@ mod test {
         events_store: Arc<RwLock<HashMap<(String, Addr), Event>>>,
         tally_store: Arc<RwLock<HashMap<(Addr, u64), EpochTally>>>,
         rewards_store: Arc<RwLock<HashMap<Addr, RewardsPool>>>,
+        watermark_store: Arc<RwLock<HashMap<Addr, u64>>>,
     ) -> Contract<state::MockStore> {
-        create_contract(params_store, events_store, tally_store, rewards_store)
+        create_contract(
+            params_store,
+            events_store,
+            tally_store,
+            rewards_store,
+            watermark_store,
+        )
     }
 
     fn setup_with_params(
@@ -804,7 +1022,14 @@ mod test {
         let rewards_store = Arc::new(RwLock::new(HashMap::new()));
         let events_store = Arc::new(RwLock::new(HashMap::new()));
         let tally_store = Arc::new(RwLock::new(HashMap::new()));
-        setup_with_stores(stored_params, events_store, tally_store, rewards_store)
+        let watermark_store = Arc::new(RwLock::new(HashMap::new()));
+        setup_with_stores(
+            stored_params,
+            events_store,
+            tally_store,
+            rewards_store,
+            watermark_store,
+        )
     }
 
     fn setup(

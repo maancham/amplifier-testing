@@ -25,12 +25,7 @@ pub struct EpochTally {
 }
 
 impl EpochTally {
-<<<<<<< HEAD
-    pub fn new(contract: Addr, epoch: Epoch) -> Self {
-=======
-    #[allow(dead_code)]
     pub fn new(contract: Addr, epoch: Epoch, rewards_params: RewardsParams) -> Self {
->>>>>>> 5c0c873 (initial implementation)
         EpochTally {
             contract,
             event_count: 0,
