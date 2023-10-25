@@ -27,7 +27,7 @@ where
     /// Returns the current epoch. The current epoch is computed dynamically based on the current
     /// block height and the epoch duration. If the epoch duration is updated, we store the epoch
     /// in which the update occurs as the last checkpoint
-    fn get_current_epoch(&self, cur_block_height: u64) -> Result<Epoch, ContractError> {
+    fn current_epoch(&self, cur_block_height: u64) -> Result<Epoch, ContractError> {
         let stored_params = self.store.load_params();
         let epoch_duration: u64 = stored_params.params.epoch_duration.into();
         let epoch = stored_params.last_updated;
@@ -93,7 +93,7 @@ where
         count: Option<u64>,
     ) -> Result<HashMap<Addr, Uint256>, ContractError> {
         let count = count.unwrap_or(DEFAULT_EPOCHS_TO_PROCESS);
-        let cur_epoch = self.get_current_epoch(block_height)?;
+        let cur_epoch = self.current_epoch(block_height)?;
         let start = self
             .store
             .load_rewards_watermark(contract.clone())?
@@ -159,7 +159,7 @@ where
         new_params: RewardsParams,
         block_height: u64,
     ) -> Result<(), ContractError> {
-        let cur_epoch = self.get_current_epoch(block_height)?;
+        let cur_epoch = self.current_epoch(block_height)?;
         // If the param update reduces the epoch duration such that the current epoch immediately ends,
         // start a new epoch at this block, incrementing the current epoch number by 1.
         // This prevents us from jumping forward an arbitrary number of epochs, and maintains consistency for past events.
@@ -231,18 +231,18 @@ mod test {
         let block_height_started = 250u64;
         let epoch_duration = 100u64;
         let contract = setup(cur_epoch_num, block_height_started, epoch_duration);
-        let new_epoch = contract.get_current_epoch(block_height_started).unwrap();
+        let new_epoch = contract.current_epoch(block_height_started).unwrap();
         assert_eq!(new_epoch.epoch_num, cur_epoch_num);
         assert_eq!(new_epoch.block_height_started, block_height_started);
 
         let new_epoch = contract
-            .get_current_epoch(block_height_started + 1)
+            .current_epoch(block_height_started + 1)
             .unwrap();
         assert_eq!(new_epoch.epoch_num, cur_epoch_num);
         assert_eq!(new_epoch.block_height_started, block_height_started);
 
         let new_epoch = contract
-            .get_current_epoch(block_height_started + epoch_duration - 1)
+            .current_epoch(block_height_started + epoch_duration - 1)
             .unwrap();
         assert_eq!(new_epoch.epoch_num, cur_epoch_num);
         assert_eq!(new_epoch.block_height_started, block_height_started);
@@ -281,7 +281,7 @@ mod test {
         ];
 
         for (height, expected_epoch_num, expected_block_start) in test_cases {
-            let new_epoch = contract.get_current_epoch(height).unwrap();
+            let new_epoch = contract.current_epoch(height).unwrap();
 
             assert_eq!(new_epoch.epoch_num, expected_epoch_num);
             assert_eq!(new_epoch.block_height_started, expected_block_start);
@@ -471,7 +471,7 @@ mod test {
         };
 
         // the epoch shouldn't change when the params are updated, since we are not changing the epoch duration
-        let expected_epoch = contract.get_current_epoch(cur_height).unwrap();
+        let expected_epoch = contract.current_epoch(cur_height).unwrap();
 
         contract
             .update_params(new_params.clone(), cur_height)
@@ -480,7 +480,7 @@ mod test {
         assert_eq!(stored.params, new_params);
 
         // current epoch shouldn't have changed
-        let cur_epoch = contract.get_current_epoch(cur_height).unwrap();
+        let cur_epoch = contract.current_epoch(cur_height).unwrap();
         assert_eq!(expected_epoch.epoch_num, cur_epoch.epoch_num);
         assert_eq!(
             expected_epoch.block_height_started,
@@ -508,7 +508,7 @@ mod test {
         let cur_height = initial_epoch_start + initial_epoch_duration * epochs_elapsed + 10; // add 10 here just to be a little past the epoch boundary
 
         // epoch shouldn't change if we are extending the duration
-        let epoch_prior_to_update = contract.get_current_epoch(cur_height).unwrap();
+        let epoch_prior_to_update = contract.current_epoch(cur_height).unwrap();
 
         let new_epoch_duration = initial_epoch_duration * 2;
         let new_params = RewardsParams {
@@ -521,18 +521,18 @@ mod test {
             .unwrap();
 
         // current epoch shouldn't change
-        let epoch = contract.get_current_epoch(cur_height).unwrap();
+        let epoch = contract.current_epoch(cur_height).unwrap();
         assert_eq!(epoch, epoch_prior_to_update);
 
         // we increased the epoch duration, so adding the initial epoch duration should leave us in the same epoch
         let epoch = contract
-            .get_current_epoch(cur_height + initial_epoch_duration)
+            .current_epoch(cur_height + initial_epoch_duration)
             .unwrap();
         assert_eq!(epoch, epoch_prior_to_update);
 
         // check that we can correctly compute the start of the next epoch
         let next_epoch = contract
-            .get_current_epoch(cur_height + new_epoch_duration)
+            .current_epoch(cur_height + new_epoch_duration)
             .unwrap();
         assert_eq!(next_epoch.epoch_num, epoch_prior_to_update.epoch_num + 1);
         assert_eq!(
@@ -559,7 +559,7 @@ mod test {
         let cur_height = initial_epoch_start + initial_epoch_duration * epochs_elapsed;
 
         let new_epoch_duration = initial_epoch_duration / 2;
-        let epoch_prior_to_update = contract.get_current_epoch(cur_height).unwrap();
+        let epoch_prior_to_update = contract.current_epoch(cur_height).unwrap();
         // we are shortening the epoch, but not so much it causes the epoch number to change. We want to remain in the same epoch
         assert!(cur_height - epoch_prior_to_update.block_height_started < new_epoch_duration);
 
@@ -572,12 +572,12 @@ mod test {
             .unwrap();
 
         // current epoch shouldn't have changed
-        let epoch = contract.get_current_epoch(cur_height).unwrap();
+        let epoch = contract.current_epoch(cur_height).unwrap();
         assert_eq!(epoch_prior_to_update, epoch);
 
         // adding the new epoch duration should increase the epoch number by 1
         let epoch = contract
-            .get_current_epoch(cur_height + new_epoch_duration)
+            .current_epoch(cur_height + new_epoch_duration)
             .unwrap();
         assert_eq!(epoch.epoch_num, epoch_prior_to_update.epoch_num + 1);
         assert_eq!(
@@ -606,7 +606,7 @@ mod test {
         // simulate progressing far enough into the epoch such that shortening the epoch duration would change the epoch
         let cur_height =
             initial_epoch_start + initial_epoch_duration * epochs_elapsed + new_epoch_duration * 2;
-        let epoch_prior_to_update = contract.get_current_epoch(cur_height).unwrap();
+        let epoch_prior_to_update = contract.current_epoch(cur_height).unwrap();
 
         let new_params = RewardsParams {
             epoch_duration: 10.try_into().unwrap(),
@@ -617,13 +617,13 @@ mod test {
             .unwrap();
 
         // should be in new epoch now
-        let epoch = contract.get_current_epoch(cur_height).unwrap();
+        let epoch = contract.current_epoch(cur_height).unwrap();
         assert_eq!(epoch.epoch_num, epoch_prior_to_update.epoch_num + 1);
         assert_eq!(epoch.block_height_started, cur_height);
 
         // moving forward the new epoch duration # of blocks should increment the epoch
         let epoch = contract
-            .get_current_epoch(cur_height + new_epoch_duration)
+            .current_epoch(cur_height + new_epoch_duration)
             .unwrap();
         assert_eq!(epoch.epoch_num, epoch_prior_to_update.epoch_num + 2);
         assert_eq!(epoch.block_height_started, cur_height + new_epoch_duration);
