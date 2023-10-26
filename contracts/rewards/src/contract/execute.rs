@@ -101,7 +101,7 @@ where
         let start_epoch = self
             .store
             .load_rewards_watermark(contract.clone())?
-            .map_or(0, |epoch| epoch + 1);
+            .map_or(0, |last_processed| last_processed + 1); // start at 0 if no stored watermark
         let mut epoch_to_process = start_epoch;
 
         // running accumulation of rewards per worker
@@ -111,7 +111,7 @@ where
         while epoch_to_process + 2 <= cur_epoch.epoch_num && epoch_to_process < start_epoch + count
         {
             let new_rewards = self.process_rewards_for_epoch(contract.clone(), epoch_to_process)?;
-            accumulated_rewards = add_rewards(accumulated_rewards, new_rewards);
+            accumulated_rewards = fold_rewards(accumulated_rewards, new_rewards);
 
             epoch_to_process += 1;
         }
@@ -133,25 +133,35 @@ where
         epoch_num: u64,
     ) -> Result<HashMap<Addr, Uint256>, ContractError> {
         match self.store.load_epoch_tally(contract.clone(), epoch_num)? {
-            None => Ok(HashMap::new()),
-            Some(tally) => {
-                let workers_to_reward = get_workers_to_reward(&tally);
-                let pool_balance = self.get_pool_balance(contract.clone())?;
+            None => Ok(HashMap::new()), // no rewards if there is no tally
+            Some(tally) => self.process_epoch_tally(tally),
+        }
+    }
+
+    fn process_epoch_tally(
+        &mut self,
+        tally: EpochTally,
+    ) -> Result<HashMap<Addr, Uint256>, ContractError> {
+        match get_workers_to_reward(&tally) {
+            Ok(workers_to_reward) => {
+                let pool_balance = self.get_pool_balance(tally.contract.clone())?;
                 let rewards_per_epoch = tally.rewards_params.rewards_per_epoch;
                 let rewards_per_worker =
                     get_rewards_per_worker(&workers_to_reward, rewards_per_epoch, pool_balance)?;
+
                 self.update_pool_balance(
-                    contract,
+                    tally.contract,
                     pool_balance,
                     &workers_to_reward,
-                    rewards_per_epoch,
+                    rewards_per_worker,
                 )?;
 
-                Ok(workers_to_reward
+                Ok(Vec::<Addr>::from(workers_to_reward)
                     .into_iter()
                     .map(|worker| (worker, rewards_per_worker))
                     .collect())
             }
+            _ => Ok(HashMap::new()), // no workers to reward
         }
     }
 
@@ -218,22 +228,20 @@ where
         &mut self,
         contract: Addr,
         old_balance: Uint256,
-        workers_to_reward: &Vec<Addr>,
-        rewards_per_epoch: nonempty::Uint256,
+        workers_to_reward: &nonempty::Vec<Addr>,
+        rewards_per_worker: Uint256,
     ) -> Result<(), ContractError> {
-        let new_balance = if workers_to_reward.len() == 0 {
-            old_balance - Uint256::from(rewards_per_epoch)
-        } else {
-            old_balance
-        };
         self.store.save_rewards_pool(&RewardsPool {
             contract,
-            balance: new_balance,
+            balance: old_balance
+                - (rewards_per_worker * Uint256::from(workers_to_reward.len() as u128)),
         })
     }
 }
 
-fn get_workers_to_reward(tally: &EpochTally) -> Vec<Addr> {
+fn get_workers_to_reward(
+    tally: &EpochTally,
+) -> Result<nonempty::Vec<Addr>, axelar_wasm_std::nonempty::Error> {
     let params = &tally.rewards_params;
 
     let cutoff = tally.event_count * u64::from(params.participation_threshold.numerator())
@@ -249,19 +257,16 @@ fn get_workers_to_reward(tally: &EpochTally) -> Vec<Addr> {
                 None
             }
         })
-        .collect()
+        .collect::<Vec<Addr>>()
+        .try_into()
+        .map_err(|err: axelar_wasm_std::nonempty::Error| err.into())
 }
 
 fn get_rewards_per_worker(
-    workers_to_reward: &Vec<Addr>,
+    workers_to_reward: &nonempty::Vec<Addr>,
     rewards_per_epoch: nonempty::Uint256,
     pool_balance: Uint256,
 ) -> Result<Uint256, ContractError> {
-    // Could theoretically return an error here, but easier 
-    if workers_to_reward.len() == 0 {
-        return Ok(Uint256::zero());
-    }
-
     let rewards_per_epoch: cosmwasm_std::Uint256 = rewards_per_epoch.into();
     if pool_balance < rewards_per_epoch {
         return Err(ContractError::PoolBalanceInsufficient.into());
@@ -274,7 +279,7 @@ fn get_rewards_per_worker(
     Ok(rewards_per_epoch.multiply_ratio(1u32, workers_to_reward.len() as u32))
 }
 
-fn add_rewards(
+fn fold_rewards(
     accumulated_rewards: HashMap<Addr, Uint256>,
     new_rewards: HashMap<Addr, Uint256>,
 ) -> HashMap<Addr, Uint256> {

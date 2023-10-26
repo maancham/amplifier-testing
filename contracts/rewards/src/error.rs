@@ -44,4 +44,7 @@ pub enum ContractError {
 
     #[error("no rewards to distribute")]
     NoRewardsToDistribute,
+
+    #[error("no workers to reward")]
+    NoWorkersToReward,
 }
