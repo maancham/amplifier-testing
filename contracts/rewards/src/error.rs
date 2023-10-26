@@ -39,12 +39,6 @@ pub enum ContractError {
     #[error("rewards pool balance insufficient")]
     PoolBalanceInsufficient,
 
-    #[error("rewards rate is too low")]
-    RateTooLow,
-
     #[error("no rewards to distribute")]
     NoRewardsToDistribute,
-
-    #[error("no workers to reward")]
-    NoWorkersToReward,
 }
