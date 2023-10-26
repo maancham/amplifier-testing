@@ -89,7 +89,7 @@ where
         Ok(())
     }
 
-    pub fn process_rewards(
+    pub fn distribute_rewards(
         &mut self,
         contract: Addr,
         block_height: u64,
@@ -110,7 +110,7 @@ where
         // we only distribute rewards for a given epoch T starting in epoch T + 2
         while epoch_to_process + 2 <= cur_epoch.epoch_num && epoch_to_process < start_epoch + count
         {
-            let new_rewards = self.process_rewards_for_epoch(contract.clone(), epoch_to_process)?;
+            let new_rewards = self.distribute_rewards_for_epoch(contract.clone(), epoch_to_process)?;
             accumulated_rewards = fold_rewards(accumulated_rewards, new_rewards);
 
             epoch_to_process += 1;
@@ -127,7 +127,7 @@ where
         Ok(accumulated_rewards)
     }
 
-    pub fn process_rewards_for_epoch(
+    pub fn distribute_rewards_for_epoch(
         &mut self,
         contract: Addr,
         epoch_num: u64,
@@ -872,7 +872,7 @@ mod test {
         );
 
         let rewards_claimed = contract
-            .process_rewards(
+            .distribute_rewards(
                 contract_addr,
                 block_height_started + epoch_duration * (epoch_count + 2) as u64,
                 None,
@@ -928,7 +928,7 @@ mod test {
         // distribute 5 epochs worth of rewards
         let epochs_to_process = 5;
         let rewards_claimed = contract
-            .process_rewards(contract_addr.clone(), cur_height, Some(epochs_to_process))
+            .distribute_rewards(contract_addr.clone(), cur_height, Some(epochs_to_process))
             .unwrap();
         assert_eq!(rewards_claimed.len(), 1);
         assert!(rewards_claimed.contains_key(&worker));
@@ -939,7 +939,7 @@ mod test {
 
         // distribute the remaining epochs worth of rewards
         let rewards_claimed = contract
-            .process_rewards(contract_addr.clone(), cur_height, None)
+            .distribute_rewards(contract_addr.clone(), cur_height, None)
             .unwrap();
         assert_eq!(rewards_claimed.len(), 1);
         assert!(rewards_claimed.contains_key(&worker));
@@ -986,13 +986,13 @@ mod test {
 
         // too early, still in the same epoch
         let err = contract
-            .process_rewards(contract_addr.clone(), block_height_started, None)
+            .distribute_rewards(contract_addr.clone(), block_height_started, None)
             .unwrap_err();
         assert_eq!(err.current_context(), &ContractError::NoRewardsToDistribute);
 
         // next epoch, but still too early to claim rewards
         let err = contract
-            .process_rewards(
+            .distribute_rewards(
                 contract_addr.clone(),
                 block_height_started + epoch_duration,
                 None,
@@ -1002,7 +1002,7 @@ mod test {
 
         // can claim now, two epochs after participation
         let rewards_claimed = contract
-            .process_rewards(
+            .distribute_rewards(
                 contract_addr,
                 block_height_started + epoch_duration * 2,
                 None,
@@ -1046,7 +1046,7 @@ mod test {
         );
 
         let err = contract
-            .process_rewards(
+            .distribute_rewards(
                 contract_addr.clone(),
                 block_height_started + epoch_duration * 2,
                 None,
@@ -1063,7 +1063,7 @@ mod test {
             Uint256::from(rewards_added).try_into().unwrap(),
         );
 
-        let result = contract.process_rewards(
+        let result = contract.distribute_rewards(
             contract_addr,
             block_height_started + epoch_duration * 2,
             None,
@@ -1105,7 +1105,7 @@ mod test {
         );
 
         let rewards_claimed = contract
-            .process_rewards(
+            .distribute_rewards(
                 contract_addr.clone(),
                 block_height_started + epoch_duration * 2,
                 None,
@@ -1115,7 +1115,7 @@ mod test {
 
         // try to claim again, shouldn't get an error
         let err = contract
-            .process_rewards(
+            .distribute_rewards(
                 contract_addr,
                 block_height_started + epoch_duration * 2,
                 None,
