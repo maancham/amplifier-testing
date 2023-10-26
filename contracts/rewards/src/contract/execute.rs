@@ -96,30 +96,35 @@ where
         count: Option<u64>,
     ) -> Result<HashMap<Addr, Uint256>, ContractError> {
         let count = count.unwrap_or(DEFAULT_EPOCHS_TO_PROCESS);
+
         let cur_epoch = self.current_epoch(block_height)?;
-        let start = self
+        let start_epoch = self
             .store
             .load_rewards_watermark(contract.clone())?
             .map_or(0, |epoch| epoch + 1);
-        let mut epoch_to_process = start;
-        let mut to_reward = HashMap::new();
-        while epoch_to_process < cur_epoch.epoch_num - 1 && epoch_to_process < start + count {
-            let rewards = self.process_rewards_for_epoch(contract.clone(), epoch_to_process)?;
-            to_reward = rewards.iter().fold(to_reward, |mut rewards, (addr, amt)| {
-                let mut new_amt = amt.clone();
-                if let Some(cur_amt) = rewards.get(addr) {
-                    new_amt += cur_amt;
-                }
-                rewards.insert(addr.clone(), new_amt);
-                rewards
-            });
+        let mut epoch_to_process = start_epoch;
+
+        // running accumulation of rewards per worker
+        let mut accumulated_rewards = HashMap::new();
+
+        // we only distribute rewards for a given epoch T starting in epoch T + 2
+        while epoch_to_process + 2 <= cur_epoch.epoch_num && epoch_to_process < start_epoch + count
+        {
+            let new_rewards = self.process_rewards_for_epoch(contract.clone(), epoch_to_process)?;
+            accumulated_rewards = add_rewards(accumulated_rewards, new_rewards);
+
             epoch_to_process += 1;
         }
-        if epoch_to_process != start {
+
+        // update the watermark if we actually processed any epochs
+        if epoch_to_process != start_epoch {
             self.store
                 .save_rewards_watermark(contract, epoch_to_process - 1)?;
+        } else {
+            return Err(ContractError::NoRewardsToDistribute.into());
         }
-        Ok(to_reward)
+
+        Ok(accumulated_rewards)
     }
 
     pub fn process_rewards_for_epoch(
@@ -127,43 +132,27 @@ where
         contract: Addr,
         epoch_num: u64,
     ) -> Result<HashMap<Addr, Uint256>, ContractError> {
-        let tally = self.store.load_epoch_tally(contract.clone(), epoch_num)?;
-        if tally.is_none() {
-            return Ok(HashMap::new());
-        }
-        let tally = tally.unwrap();
-        let params = tally.rewards_params;
+        match self.store.load_epoch_tally(contract.clone(), epoch_num)? {
+            None => Ok(HashMap::new()),
+            Some(tally) => {
+                let workers_to_reward = get_workers_to_reward(&tally);
+                let pool_balance = self.get_pool_balance(contract.clone())?;
+                let rewards_per_epoch = tally.rewards_params.rewards_per_epoch;
+                let rewards_per_worker =
+                    get_rewards_per_worker(&workers_to_reward, rewards_per_epoch, pool_balance)?;
+                self.update_pool_balance(
+                    contract,
+                    pool_balance,
+                    &workers_to_reward,
+                    rewards_per_epoch,
+                )?;
 
-        let cutoff = tally.event_count * u64::from(params.participation_threshold.numerator())
-            / u64::from(params.participation_threshold.denominator());
-        let mut to_reward = vec![];
-        for (worker, participated) in &tally.participation {
-            if *participated >= cutoff {
-                to_reward.push(worker.clone());
+                Ok(workers_to_reward
+                    .into_iter()
+                    .map(|worker| (worker, rewards_per_worker))
+                    .collect())
             }
         }
-
-        let pool = self.store.load_rewards_pool(contract.clone())?;
-        if pool.is_none() {
-            return Ok(HashMap::new());
-        }
-        let pool = pool.unwrap();
-        let rate: cosmwasm_std::Uint256 = params.rewards_per_epoch.into();
-        if pool.balance < rate {
-            return Err(ContractError::PoolBalanceInsufficient.into());
-        }
-        if rate < Uint256::from_u128(to_reward.len() as u128) {
-            return Err(ContractError::RateTooLow.into());
-        }
-        self.store.save_rewards_pool(&RewardsPool {
-            balance: pool.balance - rate,
-            ..pool
-        })?;
-        let rewards_per_worker = rate.multiply_ratio(1u32, to_reward.len() as u32);
-        Ok(to_reward
-            .into_iter()
-            .map(|worker| (worker, rewards_per_worker))
-            .collect())
     }
 
     pub fn update_params(
@@ -217,6 +206,89 @@ where
 
         Ok(())
     }
+
+    fn get_pool_balance(&self, contract_addr: Addr) -> Result<Uint256, ContractError> {
+        match self.store.load_rewards_pool(contract_addr.clone())? {
+            Some(pool) => Ok(pool.balance),
+            None => Ok(Uint256::zero()),
+        }
+    }
+
+    fn update_pool_balance(
+        &mut self,
+        contract: Addr,
+        old_balance: Uint256,
+        workers_to_reward: &Vec<Addr>,
+        rewards_per_epoch: nonempty::Uint256,
+    ) -> Result<(), ContractError> {
+        let new_balance = if workers_to_reward.len() == 0 {
+            old_balance - Uint256::from(rewards_per_epoch)
+        } else {
+            old_balance
+        };
+        self.store.save_rewards_pool(&RewardsPool {
+            contract,
+            balance: new_balance,
+        })
+    }
+}
+
+fn get_workers_to_reward(tally: &EpochTally) -> Vec<Addr> {
+    let params = &tally.rewards_params;
+
+    let cutoff = tally.event_count * u64::from(params.participation_threshold.numerator())
+        / u64::from(params.participation_threshold.denominator());
+
+    tally
+        .participation
+        .iter()
+        .filter_map(|(worker, participated)| {
+            if *participated >= cutoff {
+                Some(worker.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn get_rewards_per_worker(
+    workers_to_reward: &Vec<Addr>,
+    rewards_per_epoch: nonempty::Uint256,
+    pool_balance: Uint256,
+) -> Result<Uint256, ContractError> {
+    // Could theoretically return an error here, but easier 
+    if workers_to_reward.len() == 0 {
+        return Ok(Uint256::zero());
+    }
+
+    let rewards_per_epoch: cosmwasm_std::Uint256 = rewards_per_epoch.into();
+    if pool_balance < rewards_per_epoch {
+        return Err(ContractError::PoolBalanceInsufficient.into());
+    }
+    // A bit of a weird case. The rewards per epoch is too low to accomodate the number of workers to be rewarded
+    // This can't be checked when setting the rewards per epoch, as the number of workers to be rewarded is not known at that time.
+    if rewards_per_epoch < Uint256::from_u128(workers_to_reward.len() as u128) {
+        return Ok(Uint256::zero());
+    }
+    Ok(rewards_per_epoch.multiply_ratio(1u32, workers_to_reward.len() as u32))
+}
+
+fn add_rewards(
+    accumulated_rewards: HashMap<Addr, Uint256>,
+    new_rewards: HashMap<Addr, Uint256>,
+) -> HashMap<Addr, Uint256> {
+    new_rewards
+        .iter()
+        .fold(accumulated_rewards, |mut rewards, (addr, amt)| {
+            let new_amt = if let Some(cur_amt) = rewards.get(addr) {
+                *amt + cur_amt
+            } else {
+                *amt
+            };
+            rewards.insert(addr.clone(), new_amt);
+            rewards
+        })
 }
 
 #[cfg(test)]
@@ -230,6 +302,7 @@ mod test {
     use cosmwasm_std::{Addr, Uint256, Uint64};
 
     use crate::{
+        error::ContractError,
         msg::RewardsParams,
         state::{self, Epoch, EpochTally, Event, RewardsPool, Store, StoredParams},
     };
@@ -720,13 +793,14 @@ mod test {
         }
     }
 
+    /// Tests that rewards are distributed correctly based on participation
     #[test]
-    fn distribute_rewards_participation_threshold() {
+    fn distribute_rewards() {
         let cur_epoch_num = 0u64;
         let block_height_started = 0u64;
         let epoch_duration = 1000u64;
         let rewards_per_epoch = 100u128;
-        let participation_threshold = (8, 10);
+        let participation_threshold = (2, 3);
 
         let mut contract = setup_with_params(
             cur_epoch_num,
@@ -735,30 +809,58 @@ mod test {
             rewards_per_epoch,
             participation_threshold,
         );
-        let workers = vec![
-            (Addr::unchecked("worker1"), 8),
-            (Addr::unchecked("worker2"), 7),
-            (Addr::unchecked("worker3"), 10),
-            (Addr::unchecked("worker4"), 4),
-        ];
+        let worker1 = Addr::unchecked("worker1");
+        let worker2 = Addr::unchecked("worker2");
+        let worker3 = Addr::unchecked("worker3");
+        let worker4 = Addr::unchecked("worker4");
+        let epoch_count = 4;
+        // Simulate 4 epochs worth of events with 4 workers
+        // Each epoch has 3 possible events to participate in
+        // The integer values represent which events a specific worker participated in during that epoch
+        // Events in different epochs are considered distinct; we append the epoch number when generating the event id
+        // The below participation corresponds to the following:
+        // 2 workers rewarded in epoch 0, no workers in epoch 1 (no events in that epoch), no workers in epoch 2 (but still some events), and then 4 (all) workers in epoch 3
+        let worker_participation_per_epoch = HashMap::from([
+            (
+                worker1.clone(),
+                [vec![1, 2, 3], vec![], vec![1], vec![2, 3]], // represents the worker participated in events 1,2 and 3 in epoch 0, no events in epoch 1, event 1 in epoch 2, and events 2 and 3 in epoch 3
+            ),
+            (worker2.clone(), [vec![], vec![], vec![2], vec![1, 2, 3]]),
+            (worker3.clone(), [vec![1, 2], vec![], vec![3], vec![1, 2]]),
+            (worker4.clone(), [vec![1], vec![], vec![2], vec![2, 3]]),
+        ]);
+        // The expected rewards per worker over all 4 epochs. Based on the above participation
+        let expected_rewards_per_worker: HashMap<Addr, u128> = HashMap::from([
+            (
+                worker1.clone(),
+                rewards_per_epoch / 2 + rewards_per_epoch / 4,
+            ),
+            (worker2.clone(), rewards_per_epoch / 4),
+            (
+                worker3.clone(),
+                rewards_per_epoch / 2 + rewards_per_epoch / 4,
+            ),
+            (worker4.clone(), rewards_per_epoch / 4),
+        ]);
         let contract_addr = Addr::unchecked("worker_contract");
 
-        let event_count = 10;
-        for event in 0..event_count {
-            let event_id = event.to_string() + "event";
-            for (worker, part_count) in workers.clone() {
-                if event < part_count {
+        for (worker, events_participated) in worker_participation_per_epoch.clone() {
+            for epoch in 0..epoch_count {
+                for event in &events_participated[epoch] {
+                    let event_id = event.to_string() + &epoch.to_string() + "event";
                     let _ = contract.record_participation(
                         event_id.clone().try_into().unwrap(),
                         worker.clone(),
                         contract_addr.clone(),
-                        block_height_started,
+                        block_height_started + epoch as u64 * epoch_duration,
                     );
                 }
             }
         }
 
-        let rewards_added = 1000u128;
+        // we add 2 epochs worth of rewards. There were 2 epochs of participation, but only 2 epochs where rewards should be given out
+        // This tests we are accounting correctly, and only removing from the pool when we actually give out rewards
+        let rewards_added = 2 * rewards_per_epoch;
         let _ = contract.add_rewards(
             contract_addr.clone(),
             Uint256::from(rewards_added).try_into().unwrap(),
@@ -767,73 +869,21 @@ mod test {
         let rewards_claimed = contract
             .process_rewards(
                 contract_addr,
-                block_height_started + epoch_duration * 2,
+                block_height_started + epoch_duration * (epoch_count + 2) as u64,
                 None,
             )
             .unwrap();
-        assert_eq!(rewards_claimed.len(), 2);
-        for (worker, part_count) in workers {
-            if part_count >= participation_threshold.0 {
-                assert!(rewards_claimed.contains_key(&worker));
-                assert_eq!(
-                    rewards_claimed.get(&worker),
-                    Some(&(rewards_per_epoch / 2).into())
-                )
-            }
+
+        assert_eq!(rewards_claimed.len(), worker_participation_per_epoch.len());
+        for (worker, rewards) in expected_rewards_per_worker {
+            assert!(rewards_claimed.contains_key(&worker));
+            assert_eq!(rewards_claimed.get(&worker), Some(&Uint256::from(rewards)));
         }
     }
 
+    /// Tests that rewards are distributed correctly for a specified number of epochs, and that pagination works correctly
     #[test]
-    fn distribute_rewards_multiple_epochs() {
-        let cur_epoch_num = 0u64;
-        let block_height_started = 0u64;
-        let epoch_duration = 1000u64;
-        let rewards_per_epoch = 100u128;
-        let participation_threshold = (8, 10);
-
-        let mut contract = setup_with_params(
-            cur_epoch_num,
-            block_height_started,
-            epoch_duration,
-            rewards_per_epoch,
-            participation_threshold,
-        );
-        let worker = Addr::unchecked("worker");
-        let contract_addr = Addr::unchecked("worker_contract");
-
-        for height in block_height_started..block_height_started + epoch_duration * 10 {
-            let event_id = height.to_string() + "event";
-            let _ = contract.record_participation(
-                event_id.try_into().unwrap(),
-                worker.clone(),
-                contract_addr.clone(),
-                height,
-            );
-        }
-
-        let rewards_added = 1000u128;
-        let _ = contract.add_rewards(
-            contract_addr.clone(),
-            Uint256::from(rewards_added).try_into().unwrap(),
-        );
-
-        let rewards_claimed = contract
-            .process_rewards(
-                contract_addr,
-                block_height_started + epoch_duration * 10, // this puts us in epoch 11
-                None,
-            )
-            .unwrap();
-        assert_eq!(rewards_claimed.len(), 1);
-        assert!(rewards_claimed.contains_key(&worker));
-        assert_eq!(
-            rewards_claimed.get(&worker),
-            Some(&(rewards_per_epoch * 9).into())
-        )
-    }
-
-    #[test]
-    fn watermark_and_count() {
+    fn distribute_rewards_specify_epoch_count() {
         let cur_epoch_num = 0u64;
         let block_height_started = 0u64;
         let epoch_duration = 1000u64;
@@ -866,43 +916,207 @@ mod test {
             Uint256::from(rewards_added).try_into().unwrap(),
         );
 
+        // this puts us in epoch 10
+        let cur_height = block_height_started + epoch_duration * 9;
+        let total_epochs_with_rewards = (cur_height / epoch_duration) - 1;
+
+        // distribute 5 epochs worth of rewards
+        let epochs_to_process = 5;
         let rewards_claimed = contract
-            .process_rewards(
-                contract_addr.clone(),
-                block_height_started + epoch_duration * 9, // this puts us in epoch 10
-                Some(5),
-            )
+            .process_rewards(contract_addr.clone(), cur_height, Some(epochs_to_process))
             .unwrap();
         assert_eq!(rewards_claimed.len(), 1);
         assert!(rewards_claimed.contains_key(&worker));
         assert_eq!(
             rewards_claimed.get(&worker),
-            Some(&(rewards_per_epoch * 5).into())
+            Some(&(rewards_per_epoch * epochs_to_process as u128).into())
         );
 
+        // distribute the remaining epochs worth of rewards
         let rewards_claimed = contract
-            .process_rewards(
-                contract_addr.clone(),
-                block_height_started + epoch_duration * 9, // this puts us in epoch 10
-                None,
-            )
+            .process_rewards(contract_addr.clone(), cur_height, None)
             .unwrap();
         assert_eq!(rewards_claimed.len(), 1);
         assert!(rewards_claimed.contains_key(&worker));
         assert_eq!(
             rewards_claimed.get(&worker),
-            Some(&(rewards_per_epoch * 3).into())
+            Some(
+                &(rewards_per_epoch * (total_epochs_with_rewards - epochs_to_process) as u128)
+                    .into()
+            )
+        );
+    }
+
+    /// Tests that we do not distribute rewards for a given epoch until two epochs later
+    #[test]
+    fn distribute_rewards_too_early() {
+        let cur_epoch_num = 0u64;
+        let block_height_started = 0u64;
+        let epoch_duration = 1000u64;
+        let rewards_per_epoch = 100u128;
+        let participation_threshold = (8, 10);
+
+        let mut contract = setup_with_params(
+            cur_epoch_num,
+            block_height_started,
+            epoch_duration,
+            rewards_per_epoch,
+            participation_threshold,
+        );
+        let worker = Addr::unchecked("worker");
+        let contract_addr = Addr::unchecked("worker_contract");
+
+        let _ = contract.record_participation(
+            "event".try_into().unwrap(),
+            worker.clone(),
+            contract_addr.clone(),
+            block_height_started,
+        );
+
+        let rewards_added = 1000u128;
+        let _ = contract.add_rewards(
+            contract_addr.clone(),
+            Uint256::from(rewards_added).try_into().unwrap(),
+        );
+
+        // too early, still in the same epoch
+        let err = contract
+            .process_rewards(contract_addr.clone(), block_height_started, None)
+            .unwrap_err();
+        assert_eq!(err.current_context(), &ContractError::NoRewardsToDistribute);
+
+        // next epoch, but still too early to claim rewards
+        let err = contract
+            .process_rewards(
+                contract_addr.clone(),
+                block_height_started + epoch_duration,
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.current_context(), &ContractError::NoRewardsToDistribute);
+
+        // can claim now, two epochs after participation
+        let rewards_claimed = contract
+            .process_rewards(
+                contract_addr,
+                block_height_started + epoch_duration * 2,
+                None,
+            )
+            .unwrap();
+        assert_eq!(rewards_claimed.len(), 1);
+    }
+
+    /// Tests that an error is returned from distribute_rewards when the rewards pool balance is too low to distribute rewards,
+    /// and that rewards can later be added and subsequently claimed
+    #[test]
+    fn distribute_rewards_low_balance() {
+        let cur_epoch_num = 0u64;
+        let block_height_started = 0u64;
+        let epoch_duration = 1000u64;
+        let rewards_per_epoch = 100u128;
+        let participation_threshold = (8, 10);
+
+        let mut contract = setup_with_params(
+            cur_epoch_num,
+            block_height_started,
+            epoch_duration,
+            rewards_per_epoch,
+            participation_threshold,
+        );
+        let worker = Addr::unchecked("worker");
+        let contract_addr = Addr::unchecked("worker_contract");
+
+        let _ = contract.record_participation(
+            "event".try_into().unwrap(),
+            worker.clone(),
+            contract_addr.clone(),
+            block_height_started,
+        );
+
+        // rewards per epoch is 100, we only add 10
+        let rewards_added = 10u128;
+        let _ = contract.add_rewards(
+            contract_addr.clone(),
+            Uint256::from(rewards_added).try_into().unwrap(),
+        );
+
+        let err = contract
+            .process_rewards(
+                contract_addr.clone(),
+                block_height_started + epoch_duration * 2,
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(
+            err.current_context(),
+            &ContractError::PoolBalanceInsufficient
+        );
+        // add some more rewards
+        let rewards_added = 90u128;
+        let _ = contract.add_rewards(
+            contract_addr.clone(),
+            Uint256::from(rewards_added).try_into().unwrap(),
+        );
+
+        let result = contract.process_rewards(
+            contract_addr,
+            block_height_started + epoch_duration * 2,
+            None,
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 1);
+    }
+
+    /// Tests that an error is returned from distribute_rewards when trying to claim rewards for the same epoch more than once
+    #[test]
+    fn distribute_rewards_already_distributed() {
+        let cur_epoch_num = 0u64;
+        let block_height_started = 0u64;
+        let epoch_duration = 1000u64;
+        let rewards_per_epoch = 100u128;
+        let participation_threshold = (8, 10);
+
+        let mut contract = setup_with_params(
+            cur_epoch_num,
+            block_height_started,
+            epoch_duration,
+            rewards_per_epoch,
+            participation_threshold,
+        );
+        let worker = Addr::unchecked("worker");
+        let contract_addr = Addr::unchecked("worker_contract");
+
+        let _ = contract.record_participation(
+            "event".try_into().unwrap(),
+            worker.clone(),
+            contract_addr.clone(),
+            block_height_started,
+        );
+
+        let rewards_added = 1000u128;
+        let _ = contract.add_rewards(
+            contract_addr.clone(),
+            Uint256::from(rewards_added).try_into().unwrap(),
         );
 
         let rewards_claimed = contract
             .process_rewards(
                 contract_addr.clone(),
-                block_height_started + epoch_duration * 9, // this puts us in epoch 10
+                block_height_started + epoch_duration * 2,
                 None,
             )
             .unwrap();
-        assert_eq!(rewards_claimed.len(), 0);
-        assert!(!rewards_claimed.contains_key(&worker));
+        assert_eq!(rewards_claimed.len(), 1);
+
+        // try to claim again, shouldn't get an error
+        let err = contract
+            .process_rewards(
+                contract_addr,
+                block_height_started + epoch_duration * 2,
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.current_context(), &ContractError::NoRewardsToDistribute);
     }
 
     fn create_contract(

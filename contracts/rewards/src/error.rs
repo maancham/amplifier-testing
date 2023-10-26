@@ -41,4 +41,7 @@ pub enum ContractError {
 
     #[error("rewards rate is too low")]
     RateTooLow,
+
+    #[error("no rewards to distribute")]
+    NoRewardsToDistribute,
 }
