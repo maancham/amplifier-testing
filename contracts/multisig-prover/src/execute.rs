@@ -13,7 +13,7 @@ use crate::{
     encoding::{make_operators, CommandBatchBuilder},
     error::ContractError,
     state::{
-        Config, WorkerSet, COMMANDS_BATCH, CONFIG, CURRENT_WORKER_SET, KEY_ID, NEXT_WORKER_SET,
+        Config, WorkerSet, COMMANDS_BATCH, CONFIG, CURRENT_WORKER_SET, NEXT_WORKER_SET,
         REPLY_BATCH,
     },
     types::{BatchID, WorkersInfo},
@@ -60,7 +60,7 @@ pub fn construct_proof(
     // keep track of the batch id to use during submessage reply
     REPLY_BATCH.save(deps.storage, &command_batch.id)?;
 
-    let key_id = KEY_ID.load(deps.storage)?;
+    let key_id = CURRENT_WORKER_SET.load(deps.storage)?.id();
     let start_sig_msg = multisig::msg::ExecuteMsg::StartSigningSession {
         key_id,
         msg: command_batch.msg_digest(),
@@ -195,11 +195,7 @@ fn initialize_worker_set(
     storage: &mut dyn Storage,
     new_worker_set: WorkerSet,
 ) -> Result<(), ContractError> {
-    let key_id = new_worker_set.id(); // this is really just the worker_set_id
-
     CURRENT_WORKER_SET.save(storage, &new_worker_set)?;
-    KEY_ID.save(storage, &key_id)?;
-
     Ok(())
 }
 
@@ -289,7 +285,6 @@ pub fn confirm_worker_set(deps: DepsMut) -> Result<Response, ContractError> {
 
     CURRENT_WORKER_SET.save(deps.storage, &worker_set)?;
     NEXT_WORKER_SET.remove(deps.storage);
-    KEY_ID.save(deps.storage, &worker_set.id())?;
 
     let key_gen_msg = make_keygen_msg(worker_set.id(), snapshot, worker_set);
 
