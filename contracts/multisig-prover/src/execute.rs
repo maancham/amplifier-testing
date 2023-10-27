@@ -60,9 +60,9 @@ pub fn construct_proof(
     // keep track of the batch id to use during submessage reply
     REPLY_BATCH.save(deps.storage, &command_batch.id)?;
 
-    let key_id = CURRENT_WORKER_SET.load(deps.storage)?.id();
+    let worker_set_id = CURRENT_WORKER_SET.load(deps.storage)?.id();
     let start_sig_msg = multisig::msg::ExecuteMsg::StartSigningSession {
-        key_id,
+        worker_set_id,
         msg: command_batch.msg_digest(),
     };
 
@@ -200,12 +200,12 @@ fn initialize_worker_set(
 }
 
 fn make_keygen_msg(
-    key_id: String,
+    worker_set_id: String,
     snapshot: axelar_wasm_std::Snapshot,
     worker_set: WorkerSet,
 ) -> multisig::msg::ExecuteMsg {
     multisig::msg::ExecuteMsg::KeyGen {
-        key_id,
+        worker_set_id,
         snapshot, // TODO: refactor this to just pass the WorkerSet struct
         pub_keys_by_address: worker_set
             .signers
@@ -253,7 +253,7 @@ pub fn update_worker_set(deps: DepsMut, env: Env) -> Result<Response, ContractEr
             REPLY_BATCH.save(deps.storage, &batch.id)?;
 
             let start_sig_msg = multisig::msg::ExecuteMsg::StartSigningSession {
-                key_id: cur_worker_set.id(), // TODO remove the key_id
+                worker_set_id: cur_worker_set.id(),
                 msg: batch.msg_digest(),
             };
 

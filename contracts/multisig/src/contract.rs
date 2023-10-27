@@ -42,12 +42,12 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, axelar_wasm_std::ContractError> {
     match msg {
-        ExecuteMsg::StartSigningSession { key_id, msg } => {
+        ExecuteMsg::StartSigningSession { worker_set_id, msg } => {
             execute::require_authorized_caller(&deps, info.sender.clone())?;
             execute::start_signing_session(
                 deps,
                 info,
-                key_id,
+                worker_set_id,
                 msg.try_into()
                     .map_err(axelar_wasm_std::ContractError::from)?,
             )
@@ -57,10 +57,10 @@ pub fn execute(
             signature,
         } => execute::submit_signature(deps, env, info, session_id, signature),
         ExecuteMsg::KeyGen {
-            key_id,
+            worker_set_id,
             snapshot,
             pub_keys_by_address,
-        } => execute::key_gen(deps, info, key_id, snapshot, pub_keys_by_address),
+        } => execute::key_gen(deps, info, worker_set_id, snapshot, pub_keys_by_address),
         ExecuteMsg::RegisterPublicKey { public_key } => {
             execute::register_pub_key(deps, info, public_key)
         }
@@ -454,7 +454,7 @@ mod tests {
         let subkey = subkey.to_string();
         let snapshot = build_snapshot(&signers);
         let msg = ExecuteMsg::KeyGen {
-            key_id: subkey.clone(),
+            worker_set_id: subkey.clone(),
             snapshot: snapshot.clone(),
             pub_keys_by_address: pub_keys.clone(),
         };
@@ -495,14 +495,14 @@ mod tests {
     fn do_start_signing_session(
         deps: DepsMut,
         sender: &str,
-        key_id: &str,
+        worker_set_id: &str,
     ) -> Result<Response, axelar_wasm_std::ContractError> {
         let info = mock_info(sender, &[]);
         let env = mock_env();
 
         let message = ecdsa_test_data::message();
         let msg = ExecuteMsg::StartSigningSession {
-            key_id: key_id.to_string(),
+            worker_set_id: worker_set_id.to_string(),
             msg: message.clone(),
         };
         execute(deps, env, info, msg)

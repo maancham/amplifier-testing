@@ -21,7 +21,7 @@ pub struct InstantiateMsg {
 pub enum ExecuteMsg {
     // Can only be called by an authorized contract.
     StartSigningSession {
-        key_id: String,
+        worker_set_id: String,
         msg: HexBinary,
     },
     SubmitSignature {
@@ -29,7 +29,7 @@ pub enum ExecuteMsg {
         signature: HexBinary,
     },
     KeyGen {
-        key_id: String,
+        worker_set_id: String,
         snapshot: Snapshot,
         pub_keys_by_address: HashMap<String, (KeyType, HexBinary)>,
     },

@@ -30,7 +30,7 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, StdError> {
     match msg {
-        ExecuteMsg::StartSigningSession { key_id: _, msg: _ } => {
+        ExecuteMsg::StartSigningSession { worker_set_id: _, msg: _ } => {
             Ok(Response::new().set_data(to_binary(&Uint64::one())?))
         }
         ExecuteMsg::SubmitSignature {
@@ -38,7 +38,7 @@ pub fn execute(
             signature: _,
         } => unimplemented!(),
         ExecuteMsg::KeyGen {
-            key_id: _,
+            worker_set_id: _,
             snapshot: _,
             pub_keys_by_address: _,
         } => Ok(Response::default()),
