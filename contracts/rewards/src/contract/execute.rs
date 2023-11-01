@@ -96,43 +96,44 @@ where
         count: Option<u64>,
     ) -> Result<HashMap<Addr, Uint256>, ContractError> {
         let count = count.unwrap_or(DEFAULT_EPOCHS_TO_PROCESS);
-
         let cur_epoch = self.current_epoch(block_height)?;
-        let start_epoch = self
+        let from = self
             .store
             .load_rewards_watermark(contract.clone())?
-            .map_or(0, |last_processed| last_processed + 1); // start at 0 if no stored watermark
-        let mut epoch_to_process = start_epoch;
-
-        // running accumulation of rewards per worker
-        let mut accumulated_rewards = HashMap::new();
-
-        // we only distribute rewards for a given epoch T starting in epoch T + 2
-        while epoch_to_process + 2 <= cur_epoch.epoch_num && epoch_to_process < start_epoch + count
-        {
-            let new_rewards = self.distribute_rewards_for_epoch(contract.clone(), epoch_to_process)?;
-            accumulated_rewards = fold_rewards(accumulated_rewards, new_rewards);
-
-            epoch_to_process += 1;
-        }
-
-        // update the watermark if we actually processed any epochs
-        if epoch_to_process != start_epoch {
-            self.store
-                .save_rewards_watermark(contract, epoch_to_process - 1)?;
-        } else {
+            .map_or(0, |last_processed| last_processed + 1);
+        let to = std::cmp::min(
+            (from + count).saturating_sub(1),
+            cur_epoch.epoch_num.saturating_sub(2),
+        );
+        if to < from || cur_epoch.epoch_num < 2 {
             return Err(ContractError::NoRewardsToDistribute.into());
         }
-
-        Ok(accumulated_rewards)
+        let rewards =
+            self.process_rewards_for_epochs(contract.clone(), from, to, HashMap::new())?;
+        self.store.save_rewards_watermark(contract, to)?;
+        Ok(rewards)
     }
 
-    pub fn distribute_rewards_for_epoch(
+    fn process_rewards_for_epochs(
+        &mut self,
+        contract: Addr,
+        from: u64,
+        to: u64,
+        rewards: HashMap<Addr, Uint256>,
+    ) -> Result<HashMap<Addr, Uint256>, ContractError> {
+        if from > to {
+            return Ok(rewards);
+        }
+        let new_rewards = self.process_rewards_for_epoch(contract.clone(), from)?;
+        self.process_rewards_for_epochs(contract, from + 1, to, fold_rewards(rewards, new_rewards))
+    }
+
+    pub fn process_rewards_for_epoch(
         &mut self,
         contract: Addr,
         epoch_num: u64,
     ) -> Result<HashMap<Addr, Uint256>, ContractError> {
-        match self.store.load_epoch_tally(contract.clone(), epoch_num)? {
+        match self.store.load_epoch_tally(contract, epoch_num)? {
             None => Ok(HashMap::new()), // no rewards if there is no tally
             Some(tally) => self.process_epoch_tally(tally),
         }
@@ -279,19 +280,19 @@ fn get_rewards_per_worker(
     Ok(rewards_per_epoch.multiply_ratio(1u32, workers_to_reward.len() as u32))
 }
 
+/// Folds rewards_2 into rewards_1. For each (address, amount) pair in rewards_2,
+/// adds the rewards amount to the existing rewards amount in rewards_1. If the
+/// address is not yet in rewards_1, initializes the rewards amount to the amount in
+/// rewards_2
+/// Performs a number of inserts equal to the length of rewards_2
 fn fold_rewards(
-    accumulated_rewards: HashMap<Addr, Uint256>,
-    new_rewards: HashMap<Addr, Uint256>,
+    rewards_1: HashMap<Addr, Uint256>,
+    rewards_2: HashMap<Addr, Uint256>,
 ) -> HashMap<Addr, Uint256> {
-    new_rewards
-        .iter()
-        .fold(accumulated_rewards, |mut rewards, (addr, amt)| {
-            let new_amt = if let Some(cur_amt) = rewards.get(addr) {
-                *amt + cur_amt
-            } else {
-                *amt
-            };
-            rewards.insert(addr.clone(), new_amt);
+    rewards_2
+        .into_iter()
+        .fold(rewards_1, |mut rewards, (addr, amt)| {
+            *rewards.entry(addr).or_default() += amt;
             rewards
         })
 }
@@ -1003,12 +1004,22 @@ mod test {
         // can claim now, two epochs after participation
         let rewards_claimed = contract
             .distribute_rewards(
-                contract_addr,
+                contract_addr.clone(),
                 block_height_started + epoch_duration * 2,
                 None,
             )
             .unwrap();
         assert_eq!(rewards_claimed.len(), 1);
+
+        // should error if we try again
+        let err = contract
+            .distribute_rewards(
+                contract_addr,
+                block_height_started + epoch_duration * 2,
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err.current_context(), &ContractError::NoRewardsToDistribute);
     }
 
     /// Tests that an error is returned from distribute_rewards when the rewards pool balance is too low to distribute rewards,
