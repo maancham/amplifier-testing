@@ -56,11 +56,10 @@ pub fn execute(
             session_id,
             signature,
         } => execute::submit_signature(deps, env, info, session_id, signature),
-        ExecuteMsg::KeyGen {
-            key_id,
+        ExecuteMsg::RegisterWorkerSet {
+            worker_set,
             snapshot,
-            pub_keys_by_address,
-        } => execute::key_gen(deps, info, key_id, snapshot, pub_keys_by_address),
+        } => execute::register_worker_set(deps, info, worker_set, snapshot),
         ExecuteMsg::RegisterPublicKey { public_key } => {
             execute::register_pub_key(deps, info, public_key)
         }
@@ -81,6 +80,7 @@ pub mod execute {
 
     use crate::signing::{signer_pub_key, validate_session_signature};
     use crate::state::{load_session_signatures, save_signature};
+    use crate::workerset::WorkerSet;
     use crate::{
         key::{KeyType, KeyTyped, PublicKey, Signature},
         signing::SigningSession,
@@ -170,13 +170,24 @@ pub mod execute {
         )
     }
 
-    pub fn key_gen(
+    pub fn register_worker_set(
         deps: DepsMut,
         info: MessageInfo,
-        key_id: String,
+        worker_set: WorkerSet,
         snapshot: Snapshot,
-        pub_keys_by_address: HashMap<String, (KeyType, HexBinary)>,
     ) -> Result<Response, ContractError> {
+        let key_id = worker_set.id();
+        let pub_keys_by_address: HashMap<String, (KeyType, HexBinary)> = worker_set
+            .signers
+            .into_iter()
+            .map(|signer| {
+                (
+                    signer.address.to_string(),
+                    (KeyType::Ecdsa, signer.pub_key.as_ref().into()),
+                )
+            })
+            .collect();
+
         if snapshot.participants.len() != pub_keys_by_address.len() {
             return Err(ContractError::PublicKeysMismatchParticipants);
         }
@@ -453,7 +464,7 @@ mod tests {
 
         let subkey = subkey.to_string();
         let snapshot = build_snapshot(&signers);
-        let msg = ExecuteMsg::KeyGen {
+        let msg = ExecuteMsg::RegisterWorkerSet {
             key_id: subkey.clone(),
             snapshot: snapshot.clone(),
             pub_keys_by_address: pub_keys.clone(),

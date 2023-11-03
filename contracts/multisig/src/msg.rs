@@ -6,7 +6,7 @@ use cosmwasm_std::{Addr, HexBinary, Uint256, Uint64};
 
 use crate::{
     key::{KeyType, PublicKey, Signature},
-    types::{KeyID, MultisigState},
+    types::{KeyID, MultisigState}, workerset::WorkerSet,
 };
 
 #[cw_serde]
@@ -28,10 +28,9 @@ pub enum ExecuteMsg {
         session_id: Uint64,
         signature: HexBinary,
     },
-    KeyGen {
-        key_id: String,
+    RegisterWorkerSet {
+        worker_set: WorkerSet,
         snapshot: Snapshot,
-        pub_keys_by_address: HashMap<String, (KeyType, HexBinary)>,
     },
     RegisterPublicKey {
         public_key: PublicKey,
