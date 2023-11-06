@@ -6,7 +6,7 @@ use cosmwasm_std::{Addr, HexBinary, Uint256, Uint64};
 
 use crate::{
     key::{KeyType, PublicKey, Signature},
-    types::{KeyID, MultisigState}, workerset::WorkerSet,
+    types::{WorkerSetsID, MultisigState}, worker_set::WorkerSet,
 };
 
 #[cw_serde]
@@ -30,7 +30,6 @@ pub enum ExecuteMsg {
     },
     RegisterWorkerSet {
         worker_set: WorkerSet,
-        snapshot: Snapshot,
     },
     RegisterPublicKey {
         public_key: PublicKey,
@@ -51,8 +50,8 @@ pub enum QueryMsg {
     #[returns(Multisig)]
     GetMultisig { session_id: Uint64 },
 
-    #[returns(crate::types::Key)]
-    GetKey { key_id: KeyID },
+    #[returns(crate::types::WorkerSet)]
+    GetKey { key_id: WorkerSetsID },
 
     #[returns(PublicKey)]
     GetPublicKey {

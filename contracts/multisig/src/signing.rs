@@ -7,20 +7,20 @@ use axelar_wasm_std::Snapshot;
 
 use crate::{
     key::{PublicKey, Signature},
-    types::{Key, KeyID, MsgToSign, MultisigState},
+    types::{WorkerSet, WorkerSetsID, MsgToSign, MultisigState},
     ContractError,
 };
 
 #[cw_serde]
 pub struct SigningSession {
     pub id: Uint64,
-    pub key_id: KeyID,
+    pub key_id: WorkerSetsID,
     pub msg: MsgToSign,
     pub state: MultisigState,
 }
 
 impl SigningSession {
-    pub fn new(session_id: Uint64, key_id: KeyID, msg: MsgToSign) -> Self {
+    pub fn new(session_id: Uint64, key_id: WorkerSetsID, msg: MsgToSign) -> Self {
         Self {
             id: session_id,
             key_id,
@@ -71,7 +71,7 @@ pub fn validate_session_signature(
 }
 
 pub fn signer_pub_key<'a>(
-    key: &'a Key,
+    key: &'a WorkerSet,
     signer: &'a Addr,
     session_id: Uint64,
 ) -> Result<&'a PublicKey, ContractError> {
@@ -112,7 +112,7 @@ mod tests {
 
     pub struct TestConfig {
         pub store: MockStorage,
-        pub key: Key,
+        pub key: WorkerSet,
         pub session: SigningSession,
         pub signatures: HashMap<String, Signature>,
         pub key_type: KeyType,
@@ -124,7 +124,7 @@ mod tests {
         let signers = ecdsa_test_data::signers();
         let snapshot = build_snapshot(&signers);
 
-        let key_id = KeyID {
+        let key_id = WorkerSetsID {
             owner: Addr::unchecked("owner"),
             subkey: "subkey".to_string(),
         };
@@ -159,7 +159,7 @@ mod tests {
         let signers = ed25519_test_data::signers();
         let snapshot = build_snapshot(&signers);
 
-        let key_id = KeyID {
+        let key_id = WorkerSetsID {
             owner: Addr::unchecked("owner"),
             subkey: "subkey".to_string(),
         };

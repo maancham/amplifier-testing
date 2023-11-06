@@ -10,8 +10,9 @@ use std::collections::HashMap;
 use crate::{
     events::Event,
     msg::{ExecuteMsg, InstantiateMsg, Multisig, QueryMsg},
-    state::{get_key, Config, CONFIG, KEYS, SIGNING_SESSIONS, SIGNING_SESSION_COUNTER},
-    types::{Key, KeyID, MsgToSign, MultisigState},
+    state::{get_worker_set, Config, CONFIG, WORKER_SETS, SIGNING_SESSIONS, SIGNING_SESSION_COUNTER},
+    types::{WorkerSetsID, MsgToSign, MultisigState},
+    worker_set::WorkerSet,
     ContractError,
 };
 
@@ -58,8 +59,7 @@ pub fn execute(
         } => execute::submit_signature(deps, env, info, session_id, signature),
         ExecuteMsg::RegisterWorkerSet {
             worker_set,
-            snapshot,
-        } => execute::register_worker_set(deps, info, worker_set, snapshot),
+        } => execute::register_worker_set(deps, info, worker_set),
         ExecuteMsg::RegisterPublicKey { public_key } => {
             execute::register_pub_key(deps, info, public_key)
         }
@@ -79,8 +79,8 @@ pub mod execute {
     use cosmwasm_std::WasmMsg;
 
     use crate::signing::{signer_pub_key, validate_session_signature};
-    use crate::state::{load_session_signatures, save_signature};
-    use crate::workerset::WorkerSet;
+    use crate::state::{load_session_signatures, save_signature, get_pub_keys_from_signer};
+    use crate::worker_set::WorkerSet;
     use crate::{
         key::{KeyType, KeyTyped, PublicKey, Signature},
         signing::SigningSession,
@@ -96,11 +96,11 @@ pub mod execute {
         key_id: String,
         msg: MsgToSign,
     ) -> Result<Response, ContractError> {
-        let key_id = KeyID {
+        let key_id = WorkerSetsID {
             owner: info.sender,
             subkey: key_id,
         };
-        let key = get_key(deps.storage, &key_id)?;
+        let worker_set = get_worker_set(deps.storage, &key_id)?;
 
         let session_id = SIGNING_SESSION_COUNTER.update(
             deps.storage,
@@ -117,7 +117,7 @@ pub mod execute {
         let event = Event::SigningStarted {
             session_id,
             key_id,
-            pub_keys: key.pub_keys,
+            pub_keys: get_pub_keys_from_signer(worker_set)?,
             msg,
         };
 
@@ -137,7 +137,7 @@ pub mod execute {
         let mut session = SIGNING_SESSIONS
             .load(deps.storage, session_id.into())
             .map_err(|_| ContractError::SigningSessionNotFound { session_id })?;
-        let key = KEYS.load(deps.storage, &session.key_id)?;
+        let key = WORKER_SETS.load(deps.storage, &session.key_id)?;
 
         let pub_key = signer_pub_key(&key, &info.sender, session.id)?;
         let signature: Signature = (pub_key.key_type(), signature).try_into()?;
@@ -174,7 +174,6 @@ pub mod execute {
         deps: DepsMut,
         info: MessageInfo,
         worker_set: WorkerSet,
-        snapshot: Snapshot,
     ) -> Result<Response, ContractError> {
         let key_id = worker_set.id();
         let pub_keys_by_address: HashMap<String, (KeyType, HexBinary)> = worker_set
@@ -188,38 +187,14 @@ pub mod execute {
             })
             .collect();
 
-        if snapshot.participants.len() != pub_keys_by_address.len() {
-            return Err(ContractError::PublicKeysMismatchParticipants);
-        }
-
-        for participant in snapshot.participants.keys() {
-            if !pub_keys_by_address.contains_key(participant) {
-                return Err(ContractError::MissingPublicKey {
-                    participant: participant.to_owned(),
-                });
-            }
-        }
-
-        let key_id = KeyID {
+        let key_id = WorkerSetsID {
             owner: info.sender,
             subkey: key_id,
         };
-        let key = Key {
-            id: key_id.clone(),
-            snapshot,
-            pub_keys: pub_keys_by_address
-                .into_iter()
-                .map(|(k, v)| {
-                    (
-                        k,
-                        PublicKey::try_from(v).expect("failed to decode public key"),
-                    )
-                })
-                .collect(),
-        };
 
-        KEYS.update(deps.storage, &key_id, |existing| match existing {
-            None => Ok(key),
+
+        WORKER_SETS.update(deps.storage, &key_id, |existing| match existing {
+            None => Ok(worker_set),
             _ => Err(ContractError::DuplicateKeyID {
                 key_id: key_id.to_string(),
             }),
@@ -347,7 +322,7 @@ pub mod query {
     use crate::{
         key::{KeyType, PublicKey},
         msg::Signer,
-        state::{load_session_signatures, PUB_KEYS},
+        state::{load_session_signatures, PUB_KEYS, get_pub_keys_from_signer},
     };
 
     use super::*;
@@ -355,40 +330,35 @@ pub mod query {
     pub fn get_multisig(deps: Deps, session_id: Uint64) -> StdResult<Multisig> {
         let session = SIGNING_SESSIONS.load(deps.storage, session_id.into())?;
 
-        let mut key = KEYS.load(deps.storage, &session.key_id)?;
+        let mut worker_set = WORKER_SETS.load(deps.storage, &session.key_id)?;
 
         let signatures = load_session_signatures(deps.storage, session.id.u64())?;
 
-        let signers_with_sigs = key
-            .snapshot
-            .participants
+        let signers_with_sigs = worker_set
+            .signers
             .into_iter()
-            .map(|(address, participant)| {
-                let pub_key = key
-                    .pub_keys
-                    .remove(&address)
+            .map(| signer | {
+                let pub_key = get_pub_keys_from_signer(worker_set).unwrap()
+                    
+                    .remove(&signer.address.to_string())
                     .expect("violated invariant: pub_key not found");
 
                 (
-                    Signer {
-                        address: participant.address,
-                        weight: participant.weight.into(),
-                        pub_key,
-                    },
-                    signatures.get(&address).cloned(),
+                    signer,
+                    signatures.get(&signer.address.to_string()).cloned(),
                 )
             })
             .collect::<Vec<_>>();
 
         Ok(Multisig {
             state: session.state,
-            quorum: key.snapshot.quorum.into(),
+            quorum: worker_set.threshold.into(),
             signers: signers_with_sigs,
         })
     }
 
-    pub fn get_key(deps: Deps, key_id: KeyID) -> StdResult<Key> {
-        KEYS.load(deps.storage, &key_id)
+    pub fn get_key(deps: Deps, key_id: WorkerSetsID) -> StdResult<WorkerSet> {
+        WORKER_SETS.load(deps.storage, &key_id)
     }
 
     pub fn get_public_key(deps: Deps, worker: Addr, key_type: KeyType) -> StdResult<PublicKey> {
@@ -443,7 +413,7 @@ mod tests {
         key_type: KeyType,
         subkey: &str,
         deps: DepsMut,
-    ) -> Result<(Response, Key), axelar_wasm_std::ContractError> {
+    ) -> Result<(Response, WorkerSet), axelar_wasm_std::ContractError> {
         let info = mock_info(PROVER, &[]);
         let env = mock_env();
 
@@ -473,8 +443,8 @@ mod tests {
         execute(deps, env, info.clone(), msg).map(|res| {
             (
                 res,
-                Key {
-                    id: KeyID {
+                WorkerSet {
+                    id: WorkerSetsID {
                         owner: info.sender,
                         subkey,
                     },
@@ -495,7 +465,7 @@ mod tests {
             deps,
             env,
             QueryMsg::GetKey {
-                key_id: KeyID {
+                key_id: WorkerSetsID {
                     owner: info.sender,
                     subkey: subkey.to_string(),
                 },
@@ -667,7 +637,7 @@ mod tests {
             assert_eq!(
                 res.unwrap_err().to_string(),
                 axelar_wasm_std::ContractError::from(ContractError::DuplicateKeyID {
-                    key_id: KeyID {
+                    key_id: WorkerSetsID {
                         owner: Addr::unchecked(PROVER),
                         subkey: "key1".to_string(),
                     }
@@ -692,11 +662,11 @@ mod tests {
                 .load(deps.as_ref().storage, i as u64 + 1)
                 .unwrap();
 
-            let key_id: KeyID = KeyID {
+            let key_id: WorkerSetsID = WorkerSetsID {
                 owner: Addr::unchecked(PROVER),
                 subkey: subkey.to_string(),
             };
-            let key = get_key(deps.as_ref().storage, &key_id).unwrap();
+            let key = get_worker_set(deps.as_ref().storage, &key_id).unwrap();
             let message = match subkey {
                 ECDSA_SUBKEY => ecdsa_test_data::message(),
                 ED25519_SUBKEY => ed25519_test_data::message(),
@@ -984,7 +954,7 @@ mod tests {
             let session = SIGNING_SESSIONS
                 .load(deps.as_ref().storage, session_id.into())
                 .unwrap();
-            let key = KEYS
+            let key = WORKER_SETS
                 .load(deps.as_ref().storage, (&session.key_id).into())
                 .unwrap();
             let signatures =
