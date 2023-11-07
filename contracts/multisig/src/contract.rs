@@ -137,9 +137,9 @@ pub mod execute {
         let mut session = SIGNING_SESSIONS
             .load(deps.storage, session_id.into())
             .map_err(|_| ContractError::SigningSessionNotFound { session_id })?;
-        let key = WORKER_SETS.load(deps.storage, &session.key_id)?;
+        let worker_set = WORKER_SETS.load(deps.storage, &session.key_id)?;
 
-        let pub_key = signer_pub_key(&key, &info.sender, session.id)?;
+        let pub_key = signer_pub_key(&worker_set, &info.sender, session.id)?;
         let signature: Signature = (pub_key.key_type(), signature).try_into()?;
 
         validate_session_signature(
@@ -155,7 +155,7 @@ pub mod execute {
         let signatures = load_session_signatures(deps.storage, session_id.u64())?;
 
         let old_state = session.state.clone();
-        session.recalculate_session_state(&signatures, &key.snapshot, env.block.height);
+        session.recalculate_session_state(&signatures, &worker_set, env.block.height);
         SIGNING_SESSIONS.save(deps.storage, session.id.u64(), &session)?;
 
         let state_changed = old_state != session.state;
