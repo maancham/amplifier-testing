@@ -54,7 +54,7 @@ impl WorkerSet {
 
     pub fn get_pub_keys_from_signer(&self) -> Result<HashMap<String, PublicKey>, ContractError>{
         let mut pub_keys = HashMap::new();
-        for signer in self.signers {
+        for signer in &self.signers {
             let public_key_result = PublicKey::try_from((KeyType::Ecdsa, signer.pub_key.as_ref().into()));
     
             match public_key_result {

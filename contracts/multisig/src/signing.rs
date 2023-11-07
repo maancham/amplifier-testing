@@ -200,14 +200,14 @@ mod tests {
     fn correct_session_state() {
         for config in [ecdsa_setup(), ed25519_setup()] {
             let mut session = config.session;
-            let key = config.key;
+            let worker_set = config.key;
             let signatures = config.signatures;
             let block_height = 12345;
 
-            session.recalculate_session_state(&HashMap::new(), &key.snapshot, block_height);
+            session.recalculate_session_state(&HashMap::new(), &worker_set, block_height);
             assert_eq!(session.state, MultisigState::Pending);
 
-            session.recalculate_session_state(&signatures, &key.snapshot, block_height);
+            session.recalculate_session_state(&signatures, &worker_set, block_height);
             assert_eq!(
                 session.state,
                 MultisigState::Completed {

@@ -347,7 +347,7 @@ pub mod query {
                             .expect("violated invariant: pub_key not found");
 
                         (
-                            signer,
+                            signer.clone(),
                             signatures.get(&signer.address.to_string()).cloned(),
                         )
                     })
