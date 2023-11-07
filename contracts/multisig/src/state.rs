@@ -63,23 +63,6 @@ pub fn get_worker_set(store: &dyn Storage, key_id: &WorkerSetsID) -> Result<Work
             key_id: key_id.to_string(),
         })
 }
-pub fn get_pub_keys_from_signer(worker_set: WorkerSet) -> Result<HashMap<String, PublicKey>, ContractError>{
-    let mut pub_keys = HashMap::new();
-    for signer in worker_set.signers {
-        let public_key_result = PublicKey::try_from((KeyType::Ecdsa, signer.pub_key.as_ref().into()));
-
-        match public_key_result {
-            Ok(public_key) => {
-                pub_keys.insert(signer.address.to_string(), public_key);
-            },
-            Err(e) => {
-                // Handle the error, for example, by returning a custom error
-                return Err(e);
-            }
-        }
-    }
-    Ok(pub_keys)
-}
 
 // key type is part of the key so signers can register multiple keys with different types
 pub const PUB_KEYS: Map<(Addr, KeyType), HexBinary> = Map::new("registered_pub_keys");

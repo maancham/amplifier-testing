@@ -79,7 +79,7 @@ pub mod execute {
     use cosmwasm_std::WasmMsg;
 
     use crate::signing::{signer_pub_key, validate_session_signature};
-    use crate::state::{load_session_signatures, save_signature, get_pub_keys_from_signer};
+    use crate::state::{load_session_signatures, save_signature};
     use crate::worker_set::WorkerSet;
     use crate::{
         key::{KeyType, KeyTyped, PublicKey, Signature},
@@ -117,7 +117,7 @@ pub mod execute {
         let event = Event::SigningStarted {
             session_id,
             key_id,
-            pub_keys: get_pub_keys_from_signer(worker_set)?,
+            pub_keys: worker_set.get_pub_keys_from_signer()?,
             msg,
         };
 
@@ -319,10 +319,12 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
 }
 
 pub mod query {
+    use cosmwasm_std::StdError;
+
     use crate::{
         key::{KeyType, PublicKey},
         msg::Signer,
-        state::{load_session_signatures, PUB_KEYS, get_pub_keys_from_signer},
+        state::{load_session_signatures, PUB_KEYS},
     };
 
     use super::*;
@@ -330,31 +332,38 @@ pub mod query {
     pub fn get_multisig(deps: Deps, session_id: Uint64) -> StdResult<Multisig> {
         let session = SIGNING_SESSIONS.load(deps.storage, session_id.into())?;
 
-        let mut worker_set = WORKER_SETS.load(deps.storage, &session.key_id)?;
+        let mut worker_set: WorkerSet = WORKER_SETS.load(deps.storage, &session.key_id)?;
+        let mut pub_key_res = worker_set.get_pub_keys_from_signer();
+        match pub_key_res {
+            Ok(mut pub_key) => {
+                let signatures = load_session_signatures(deps.storage, session.id.u64())?;
 
-        let signatures = load_session_signatures(deps.storage, session.id.u64())?;
+                let signers_with_sigs = worker_set
+                    .signers
+                    .into_iter()
+                    .map(| signer | {
+                            pub_key
+                            .remove(&signer.address.to_string())
+                            .expect("violated invariant: pub_key not found");
 
-        let signers_with_sigs = worker_set
-            .signers
-            .into_iter()
-            .map(| signer | {
-                let pub_key = get_pub_keys_from_signer(worker_set).unwrap()
-                    
-                    .remove(&signer.address.to_string())
-                    .expect("violated invariant: pub_key not found");
+                        (
+                            signer,
+                            signatures.get(&signer.address.to_string()).cloned(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
 
-                (
-                    signer,
-                    signatures.get(&signer.address.to_string()).cloned(),
-                )
-            })
-            .collect::<Vec<_>>();
-
-        Ok(Multisig {
-            state: session.state,
-            quorum: worker_set.threshold.into(),
-            signers: signers_with_sigs,
-        })
+                Ok(Multisig {
+                    state: session.state,
+                    quorum: worker_set.threshold.into(),
+                    signers: signers_with_sigs,
+                })
+            },
+            Err(e) => {
+                Err(StdError::generic_err(e.to_string()))
+            }
+        }
+        
     }
 
     pub fn get_key(deps: Deps, key_id: WorkerSetsID) -> StdResult<WorkerSet> {

@@ -1,6 +1,7 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
-use crate::key::PublicKey;
+use crate::key::KeyType;
+use crate::{key::PublicKey, ContractError};
 use crate::msg::Signer;
 use axelar_wasm_std::Participant;
 use cosmwasm_schema::cw_serde;
@@ -49,5 +50,22 @@ impl WorkerSet {
 
     pub fn id(&self) -> String {
         self.hash().to_hex()
+    }
+
+    pub fn get_pub_keys_from_signer(&self) -> Result<HashMap<String, PublicKey>, ContractError>{
+        let mut pub_keys = HashMap::new();
+        for signer in self.signers {
+            let public_key_result = PublicKey::try_from((KeyType::Ecdsa, signer.pub_key.as_ref().into()));
+    
+            match public_key_result {
+                Ok(public_key) => {
+                    pub_keys.insert(signer.address.to_string(), public_key);
+                },
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+        Ok(pub_keys)
     }
 }
