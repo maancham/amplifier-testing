@@ -175,28 +175,16 @@ pub mod execute {
         info: MessageInfo,
         worker_set: WorkerSet,
     ) -> Result<Response, ContractError> {
-        let key_id = worker_set.id();
-        let pub_keys_by_address: HashMap<String, (KeyType, HexBinary)> = worker_set
-            .signers
-            .into_iter()
-            .map(|signer| {
-                (
-                    signer.address.to_string(),
-                    (KeyType::Ecdsa, signer.pub_key.as_ref().into()),
-                )
-            })
-            .collect();
-
-        let key_id = WorkerSetsID {
+        let worker_sets_id = WorkerSetsID {
             owner: info.sender,
-            subkey: key_id,
+            subkey: worker_set.id(),
         };
 
 
-        WORKER_SETS.update(deps.storage, &key_id, |existing| match existing {
+        WORKER_SETS.update(deps.storage, &worker_sets_id, |existing| match existing {
             None => Ok(worker_set),
             _ => Err(ContractError::DuplicateKeyID {
-                key_id: key_id.to_string(),
+                key_id: worker_sets_id.to_string(),
             }),
         })?;
 
