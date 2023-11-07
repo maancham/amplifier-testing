@@ -9,7 +9,7 @@ use crate::{
     key::{PublicKey, Signature},
     types::{WorkerSetsID, MsgToSign, MultisigState},
     worker_set::WorkerSet,
-    ContractError,
+    ContractError, state::get_pub_keys_from_signer,
 };
 
 #[cw_serde]
@@ -72,11 +72,11 @@ pub fn validate_session_signature(
 }
 
 pub fn signer_pub_key<'a>(
-    key: &'a WorkerSet,
+    worker_set: &'a WorkerSet,
     signer: &'a Addr,
     session_id: Uint64,
 ) -> Result<&'a PublicKey, ContractError> {
-    match key.pub_keys.get(signer.as_str()) {
+    match get_pub_keys_from_signer(worker_set.clone())?.get(signer.as_str()) {
         Some(pub_key) => Ok(pub_key),
         None => Err(ContractError::NotAParticipant {
             session_id,
