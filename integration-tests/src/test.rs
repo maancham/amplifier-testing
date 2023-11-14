@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod test {
     use axelar_wasm_std::{nonempty, voting};
-    use connection_router::state::ChainName;
-    use cosmwasm_std::{coins, Addr, Binary, Deps, Env, StdResult, Uint128, Uint256};
+    use connection_router::state::{ChainName, CrossChainId, Message};
+    use cosmwasm_std::{coins, Addr, Binary, Deps, Env, StdResult, Uint128, Uint256, Uint64};
     use cw_multi_test::{App, ContractWrapper, Executor};
     use itertools::Itertools;
 
@@ -90,8 +90,64 @@ mod test {
             service_name,
             governance_address,
             vec![chain1.clone(), chain2.clone()],
-            workers,
+            workers.clone(),
+            genesis,
         );
+
+        app.execute_contract(
+            Addr::unchecked("relayer"),
+            chain1.gateway.clone(),
+            &gateway::msg::ExecuteMsg::VerifyMessages(vec![Message {
+                cc_id: CrossChainId {
+                    chain: chain1.chain_name.clone(),
+                    id: "foobar:2".to_string().try_into().unwrap(),
+                },
+                source_address: "some address".to_string().try_into().unwrap(),
+                destination_address: "some other address".to_string().try_into().unwrap(),
+                destination_chain: chain2.chain_name.clone(),
+                payload_hash: [0; 32],
+            }]),
+            &[],
+        )
+        .unwrap();
+
+        for worker in workers {
+            app.execute_contract(
+                worker,
+                chain1.voting_verifier.clone(),
+                &voting_verifier::msg::ExecuteMsg::Vote {
+                    poll_id: Uint64::one().into(),
+                    votes: vec![true],
+                },
+                &[],
+            )
+            .unwrap();
+        }
+        app.execute_contract(
+            Addr::unchecked("relayer"),
+            chain1.voting_verifier,
+            &voting_verifier::msg::ExecuteMsg::EndPoll {
+                poll_id: Uint64::one().into(),
+            },
+            &[],
+        ).unwrap();
+
+        app.execute_contract(
+            Addr::unchecked("relayer"),
+            chain1.gateway,
+            &gateway::msg::ExecuteMsg::RouteMessages(vec![Message {
+                cc_id: CrossChainId {
+                    chain: chain1.chain_name,
+                    id: "foobar:2".to_string().try_into().unwrap(),
+                },
+                source_address: "some address".to_string().try_into().unwrap(),
+                destination_address: "some other address".to_string().try_into().unwrap(),
+                destination_chain: chain2.chain_name,
+                payload_hash: [0; 32],
+            }]),
+            &[],
+        )
+        .unwrap();
     }
     fn register_chain(
         mut app: &mut App,
@@ -118,8 +174,17 @@ mod test {
         governance_addr: Addr,
         chains: Vec<Chain>,
         workers: Vec<Addr>,
+        genesis: Addr,
     ) {
         let min_worker_bond = Uint128::new(100);
+        for worker in &workers {
+            app.send_tokens(
+                genesis.clone(),
+                worker.clone(),
+                &coins(min_worker_bond.u128(), AXL_DENOMINATION),
+            )
+            .unwrap();
+        }
         let res = app.execute_contract(
             governance_addr.clone(),
             service_registry.clone(),
