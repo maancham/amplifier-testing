@@ -37,24 +37,32 @@ pub fn construct_proof(
         config.gateway.clone(),
         config.chain_name.clone(),
     )?;
+    println!("building");
 
     let command_batch = match COMMANDS_BATCH.may_load(deps.storage, &batch_id)? {
         Some(batch) => batch,
         None => {
+            println!("getting worker info");
             let workers_info = get_workers_info(&deps, &config)?;
+            println!("got worker info");
             let new_worker_set = get_next_worker_set(&deps, &env, &config)?;
+            println!("got next worker set");
             let mut builder = CommandBatchBuilder::new(config.destination_chain_id, config.encoder);
 
+            println!("starting build");
             if let Some(new_worker_set) = new_worker_set {
                 save_next_worker_set(deps.storage, workers_info, new_worker_set.clone())?;
                 builder.add_new_worker_set(new_worker_set)?;
             }
 
+            println!("adding messages");
             for msg in messages {
                 builder.add_message(msg)?;
             }
+            println!("building");
             let batch = builder.build()?;
 
+            println!("built");
             COMMANDS_BATCH.save(deps.storage, &batch.id, &batch)?;
 
             batch
@@ -90,11 +98,13 @@ fn get_messages(
                 .expect("ids should have correct format")
         })
         .collect::<Vec<_>>();
+    println!("querying");
     let query = gateway::msg::QueryMsg::GetMessages { message_ids: ids };
     let messages: Vec<Message> = querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
         contract_addr: gateway.into(),
         msg: to_binary(&query)?,
     }))?;
+    println!("queried");
 
     assert!(
         messages.len() == length,

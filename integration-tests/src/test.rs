@@ -2,9 +2,16 @@
 mod test {
     use axelar_wasm_std::{nonempty, voting};
     use connection_router::state::{ChainName, CrossChainId, Message};
-    use cosmwasm_std::{coins, Addr, Binary, Deps, Env, StdResult, Uint128, Uint256, Uint64};
+    use cosmwasm_std::{
+        coins, Addr, Binary, BlockInfo, Deps, Env, HexBinary, StdResult, Uint128, Uint256, Uint64,
+    };
     use cw_multi_test::{App, ContractWrapper, Executor};
     use itertools::Itertools;
+
+    use k256::ecdsa::{
+        signature::Signer, signature::Verifier, Signature, SigningKey, VerifyingKey,
+    };
+    use rand_core::OsRng;
 
     const AXL_DENOMINATION: &str = "uaxl";
     #[test]
@@ -30,10 +37,10 @@ mod test {
             &mut app,
             rewards::msg::InstantiateMsg {
                 governance_address: governance_address.to_string(),
-                rewards_denom: "UAXL".to_string(),
+                rewards_denom: AXL_DENOMINATION.to_string(),
                 params: rewards::msg::Params {
                     epoch_duration: nonempty::Uint64::try_from(10u64).unwrap(),
-                    rewards_per_epoch: Uint256::from_u128(100u128).try_into().unwrap(),
+                    rewards_per_epoch: Uint128::from(100u128).try_into().unwrap(),
                     participation_threshold: (1, 2).try_into().unwrap(),
                 },
             },
@@ -53,12 +60,27 @@ mod test {
             },
         );
         let service_name: nonempty::String = "validators".to_string().try_into().unwrap();
+        let workers = vec![Addr::unchecked("worker1"), Addr::unchecked("worker2")];
+        register_workers(
+            &mut app,
+            service_registry_address.clone(),
+            multisig_address.clone(),
+            service_name.clone(),
+            governance_address.clone(),
+            vec![
+                "Ethereum".to_string().try_into().unwrap(),
+                "Polygon".to_string().try_into().unwrap(),
+            ],
+            workers.clone(),
+            genesis.clone(),
+        );
         let chain1 = instantiate_chain(
             &mut app,
             router_address.clone(),
             service_registry_address.clone(),
             rewards_address.clone(),
             multisig_address.clone(),
+            governance_address.clone(),
             service_name.clone(),
             "Ethereum".to_string().try_into().unwrap(),
         );
@@ -66,8 +88,9 @@ mod test {
             &mut app,
             router_address.clone(),
             service_registry_address.clone(),
-            rewards_address,
-            multisig_address,
+            rewards_address.clone(),
+            multisig_address.clone(),
+            governance_address.clone(),
             service_name.clone(),
             "Polygon".to_string().try_into().unwrap(),
         );
@@ -83,16 +106,26 @@ mod test {
             governance_address.clone(),
             chain2.clone(),
         );
-        let workers = vec![Addr::unchecked("worker1"), Addr::unchecked("worker2")];
-        register_workers(
-            &mut app,
-            service_registry_address,
-            service_name,
-            governance_address,
-            vec![chain1.clone(), chain2.clone()],
-            workers.clone(),
+
+        app.execute_contract(
             genesis,
-        );
+            rewards_address.clone(),
+            &rewards::msg::ExecuteMsg::AddRewards {
+                contract_address: chain1.voting_verifier.to_string(),
+            },
+            &coins(1000, AXL_DENOMINATION),
+        )
+        .unwrap();
+        let msg = Message {
+            cc_id: CrossChainId {
+                chain: chain1.chain_name.clone(),
+                id: "foobar:2".to_string().try_into().unwrap(),
+            },
+            source_address: "some address".to_string().try_into().unwrap(),
+            destination_address: "some other address".to_string().try_into().unwrap(),
+            destination_chain: chain2.chain_name.clone(),
+            payload_hash: [0; 32],
+        };
 
         app.execute_contract(
             Addr::unchecked("relayer"),
@@ -102,8 +135,14 @@ mod test {
                     chain: chain1.chain_name.clone(),
                     id: "foobar:2".to_string().try_into().unwrap(),
                 },
-                source_address: "some address".to_string().try_into().unwrap(),
-                destination_address: "some other address".to_string().try_into().unwrap(),
+                source_address: "0xce16F69375520ab01377ce7B88f5BA8C48F8D666"
+                    .to_string()
+                    .try_into()
+                    .unwrap(),
+                destination_address: "0xce16F69375520ab01377ce7B88f5BA8C48F8D666"
+                    .to_string()
+                    .try_into()
+                    .unwrap(),
                 destination_chain: chain2.chain_name.clone(),
                 payload_hash: [0; 32],
             }]),
@@ -111,9 +150,9 @@ mod test {
         )
         .unwrap();
 
-        for worker in workers {
+        for worker in &workers {
             app.execute_contract(
-                worker,
+                worker.clone(),
                 chain1.voting_verifier.clone(),
                 &voting_verifier::msg::ExecuteMsg::Vote {
                     poll_id: Uint64::one().into(),
@@ -125,26 +164,77 @@ mod test {
         }
         app.execute_contract(
             Addr::unchecked("relayer"),
-            chain1.voting_verifier,
+            chain1.voting_verifier.clone(),
             &voting_verifier::msg::ExecuteMsg::EndPoll {
                 poll_id: Uint64::one().into(),
             },
             &[],
-        ).unwrap();
+        )
+        .unwrap();
 
         app.execute_contract(
             Addr::unchecked("relayer"),
             chain1.gateway,
             &gateway::msg::ExecuteMsg::RouteMessages(vec![Message {
                 cc_id: CrossChainId {
-                    chain: chain1.chain_name,
+                    chain: chain1.chain_name.clone(),
                     id: "foobar:2".to_string().try_into().unwrap(),
                 },
-                source_address: "some address".to_string().try_into().unwrap(),
-                destination_address: "some other address".to_string().try_into().unwrap(),
+                source_address: "0xce16F69375520ab01377ce7B88f5BA8C48F8D666"
+                    .to_string()
+                    .try_into()
+                    .unwrap(),
+                destination_address: "0xce16F69375520ab01377ce7B88f5BA8C48F8D666"
+                    .to_string()
+                    .try_into()
+                    .unwrap(),
                 destination_chain: chain2.chain_name,
                 payload_hash: [0; 32],
             }]),
+            &[],
+        )
+        .unwrap();
+
+        let messages: Vec<Message> = app
+            .wrap()
+            .query_wasm_smart(
+                chain2.gateway,
+                &gateway::msg::QueryMsg::GetMessages {
+                    message_ids: vec![CrossChainId {
+                        chain: chain1.chain_name.clone(),
+                        id: "foobar:2".to_string().try_into().unwrap(),
+                    }],
+                },
+            )
+            .unwrap();
+        assert_eq!(messages.len(), 1);
+        let old_block = app.block_info();
+        app.set_block(BlockInfo {
+            height: old_block.height + 20,
+            ..old_block
+        });
+
+        app.execute_contract(
+            Addr::unchecked("relayer"),
+            rewards_address,
+            &rewards::msg::ExecuteMsg::DistributeRewards {
+                contract_address: chain1.voting_verifier.to_string(),
+                epoch_count: None,
+            },
+            &[],
+        );
+
+        for worker in workers {
+            let balance = app.wrap().query_balance(worker, AXL_DENOMINATION).unwrap();
+            assert_eq!(balance.amount, Uint128::from(50u128));
+        }
+
+        app.execute_contract(
+            Addr::unchecked("relayer"),
+            chain2.multisig_prover,
+            &multisig_prover::msg::ExecuteMsg::ConstructProof {
+                message_ids: vec![msg.cc_id.to_string()],
+            },
             &[],
         )
         .unwrap();
@@ -170,9 +260,10 @@ mod test {
     fn register_workers(
         mut app: &mut App,
         service_registry: Addr,
+        multisig: Addr,
         service_name: nonempty::String,
         governance_addr: Addr,
-        chains: Vec<Chain>,
+        chains: Vec<ChainName>,
         workers: Vec<Addr>,
         genesis: Addr,
     ) {
@@ -228,11 +319,28 @@ mod test {
                 service_registry.clone(),
                 &service_registry::msg::ExecuteMsg::DeclareChainSupport {
                     service_name: service_name.to_string(),
-                    chains: chains.iter().map(|c| c.chain_name.clone()).collect(),
+                    chains: chains.clone(),
                 },
                 &[],
             );
             assert!(res.is_ok());
+            let signing_key = SigningKey::random(&mut OsRng);
+            let sk = signing_key.to_bytes();
+            println!("\nSigning key: {:x?}", hex::encode(sk));
+            let verify_key = VerifyingKey::from(&signing_key);
+            // Serialize with `::to_encoded_point()`
+            let vk = verify_key.to_sec1_bytes();
+            let pk = HexBinary::from_hex(&hex::encode(vk)).unwrap();
+            let res = app
+                .execute_contract(
+                    worker.clone(),
+                    multisig.clone(),
+                    &multisig::msg::ExecuteMsg::RegisterPublicKey {
+                        public_key: multisig::key::PublicKey::Ecdsa(pk),
+                    },
+                    &[],
+                )
+                .unwrap();
         }
     }
 
@@ -250,6 +358,7 @@ mod test {
         service_registry_address: Addr,
         rewards_address: Addr,
         multisig_address: Addr,
+        governance_address: Addr,
         service_name: nonempty::String,
         chain_name: ChainName,
     ) -> Chain {
@@ -277,7 +386,7 @@ mod test {
             &mut app,
             multisig_prover::msg::InstantiateMsg {
                 admin_address: Addr::unchecked("doesn't matter").to_string(),
-                gateway_address: "doesn't matter".to_string(),
+                gateway_address: gateway.to_string(),
                 multisig_address: multisig_address.to_string(),
                 service_registry_address: service_registry_address.to_string(),
                 voting_verifier_address: voting_verifier.to_string(),
@@ -287,8 +396,24 @@ mod test {
                 chain_name: chain_name.to_string(),
                 worker_set_diff_threshold: 1,
                 encoder: multisig_prover::encoding::Encoder::Abi,
+                key_type: multisig::key::KeyType::Ecdsa,
             },
         );
+        app.execute_contract(
+            Addr::unchecked("doesn't matter"),
+            multisig_prover.clone(),
+            &multisig_prover::msg::ExecuteMsg::UpdateWorkerSet,
+            &[],
+        )
+        .unwrap();
+        app.execute_contract(
+            governance_address,
+            multisig_address,
+            &multisig::msg::ExecuteMsg::AuthorizeCaller {
+                contract_address: multisig_prover.clone(),
+            },
+            &[],
+        ).unwrap();
         Chain {
             gateway,
             voting_verifier,
@@ -429,7 +554,7 @@ mod test {
             multisig_prover::contract::execute,
             multisig_prover::contract::instantiate,
             multisig_prover::contract::query,
-        );
+        ).with_reply(multisig_prover::contract::reply);
         let code_id = app.store_code(Box::new(code));
 
         app.instantiate_contract(
