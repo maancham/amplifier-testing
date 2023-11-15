@@ -11,6 +11,7 @@ mod test {
     use k256::ecdsa::{
         signature::Signer, signature::Verifier, Signature, SigningKey, VerifyingKey,
     };
+    use multisig::{key::PublicKey, signing};
     use rand_core::OsRng;
 
     const AXL_DENOMINATION: &str = "uaxl";
@@ -61,6 +62,7 @@ mod test {
         );
         let service_name: nonempty::String = "validators".to_string().try_into().unwrap();
         let workers = vec![Addr::unchecked("worker1"), Addr::unchecked("worker2")];
+        let workers_with_keys = generate_keys(workers.clone());
         register_workers(
             &mut app,
             service_registry_address.clone(),
@@ -71,7 +73,7 @@ mod test {
                 "Ethereum".to_string().try_into().unwrap(),
                 "Polygon".to_string().try_into().unwrap(),
             ],
-            workers.clone(),
+            workers_with_keys.clone(),
             genesis.clone(),
         );
         let chain1 = instantiate_chain(
@@ -229,15 +231,38 @@ mod test {
             assert_eq!(balance.amount, Uint128::from(50u128));
         }
 
-        app.execute_contract(
-            Addr::unchecked("relayer"),
-            chain2.multisig_prover,
-            &multisig_prover::msg::ExecuteMsg::ConstructProof {
-                message_ids: vec![msg.cc_id.to_string()],
-            },
-            &[],
-        )
-        .unwrap();
+        let res = app
+            .execute_contract(
+                Addr::unchecked("relayer"),
+                chain2.multisig_prover,
+                &multisig_prover::msg::ExecuteMsg::ConstructProof {
+                    message_ids: vec![msg.cc_id.to_string()],
+                },
+                &[],
+            )
+            .unwrap();
+        println!("{:?}", res.events);
+        let mut msg = "".to_string();
+        for event in res.events {
+            let attr = event.attributes.iter().find(|attr| attr.key == "msg");
+            if attr.is_some() {
+                msg = attr.clone().unwrap().value.clone();
+            }
+        }
+        assert!(msg != "");
+        for worker in workers_with_keys {
+            let signature : Signature = worker.1.sign(HexBinary::from_hex(&msg).unwrap().as_slice());
+            let sig : String = hex::encode(signature.to_bytes().as_slice());
+            app.execute_contract(
+                worker.0,
+                multisig_address.clone(),
+                &multisig::msg::ExecuteMsg::SubmitSignature {
+                    session_id: Uint64::one(),
+                    signature: HexBinary::from_hex(&sig).unwrap(),
+                },
+                &[],
+            ).unwrap();
+        }
     }
     fn register_chain(
         mut app: &mut App,
@@ -257,6 +282,21 @@ mod test {
         .unwrap();
     }
 
+    fn generate_keys(worker_addresses: Vec<Addr>) -> Vec<(Addr, SigningKey, PublicKey)> {
+        let mut workers = vec![];
+        for worker in worker_addresses {
+            let signing_key = SigningKey::random(&mut OsRng);
+            let sk = signing_key.to_bytes();
+            println!("\nSigning key: {:x?}", hex::encode(sk));
+            let verify_key = VerifyingKey::from(&signing_key);
+            // Serialize with `::to_encoded_point()`
+            let vk = verify_key.to_sec1_bytes();
+            let pk = HexBinary::from_hex(&hex::encode(vk)).unwrap();
+            workers.push((worker, signing_key, PublicKey::Ecdsa(pk)));
+        }
+        workers
+    }
+
     fn register_workers(
         mut app: &mut App,
         service_registry: Addr,
@@ -264,14 +304,14 @@ mod test {
         service_name: nonempty::String,
         governance_addr: Addr,
         chains: Vec<ChainName>,
-        workers: Vec<Addr>,
+        workers: Vec<(Addr, SigningKey, PublicKey)>,
         genesis: Addr,
     ) {
         let min_worker_bond = Uint128::new(100);
         for worker in &workers {
             app.send_tokens(
                 genesis.clone(),
-                worker.clone(),
+                worker.0.clone(),
                 &coins(min_worker_bond.u128(), AXL_DENOMINATION),
             )
             .unwrap();
@@ -297,15 +337,15 @@ mod test {
             governance_addr,
             service_registry.clone(),
             &service_registry::msg::ExecuteMsg::AuthorizeWorkers {
-                workers: workers.iter().map(|w| w.to_string()).collect(),
+                workers: workers.iter().map(|w| w.0.to_string()).collect(),
                 service_name: service_name.to_string(),
             },
             &[],
         );
         assert!(res.is_ok());
-        for worker in workers {
+        for (addr, _, pk) in workers {
             let res = app.execute_contract(
-                worker.clone(),
+                addr.clone(),
                 service_registry.clone(),
                 &service_registry::msg::ExecuteMsg::BondWorker {
                     service_name: service_name.to_string(),
@@ -315,7 +355,7 @@ mod test {
             assert!(res.is_ok());
 
             let res = app.execute_contract(
-                worker.clone(),
+                addr.clone(),
                 service_registry.clone(),
                 &service_registry::msg::ExecuteMsg::DeclareChainSupport {
                     service_name: service_name.to_string(),
@@ -323,21 +363,11 @@ mod test {
                 },
                 &[],
             );
-            assert!(res.is_ok());
-            let signing_key = SigningKey::random(&mut OsRng);
-            let sk = signing_key.to_bytes();
-            println!("\nSigning key: {:x?}", hex::encode(sk));
-            let verify_key = VerifyingKey::from(&signing_key);
-            // Serialize with `::to_encoded_point()`
-            let vk = verify_key.to_sec1_bytes();
-            let pk = HexBinary::from_hex(&hex::encode(vk)).unwrap();
             let res = app
                 .execute_contract(
-                    worker.clone(),
+                    addr.clone(),
                     multisig.clone(),
-                    &multisig::msg::ExecuteMsg::RegisterPublicKey {
-                        public_key: multisig::key::PublicKey::Ecdsa(pk),
-                    },
+                    &multisig::msg::ExecuteMsg::RegisterPublicKey { public_key: pk },
                     &[],
                 )
                 .unwrap();
@@ -413,7 +443,8 @@ mod test {
                 contract_address: multisig_prover.clone(),
             },
             &[],
-        ).unwrap();
+        )
+        .unwrap();
         Chain {
             gateway,
             voting_verifier,
@@ -554,7 +585,8 @@ mod test {
             multisig_prover::contract::execute,
             multisig_prover::contract::instantiate,
             multisig_prover::contract::query,
-        ).with_reply(multisig_prover::contract::reply);
+        )
+        .with_reply(multisig_prover::contract::reply);
         let code_id = app.store_code(Box::new(code));
 
         app.instantiate_contract(
