@@ -168,9 +168,15 @@ impl KeyTyped for Signature {
 
 impl Signature {
     pub fn verify(&self, msg: &MsgToSign, pub_key: &PublicKey) -> Result<bool, ContractError> {
+        println!("verifying");
         if !self.matches_type(pub_key) {
             return Err(ContractError::KeyTypeMismatch);
         }
+        println!("key type good");
+        println!("{:?}",self.key_type());
+        println!("{:?}",msg);
+        println!("{:?}", pub_key);
+        println!("{:?}", self);
 
         match self.key_type() {
             KeyType::Ecdsa => ecdsa_verify(msg.as_ref(), self, pub_key.as_ref()),

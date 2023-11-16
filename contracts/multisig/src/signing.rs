@@ -61,6 +61,7 @@ pub fn validate_session_signature(
     }
 
     if !signature.verify(&session.msg, pub_key)? {
+        println!("failed to verify");
         return Err(ContractError::InvalidSignature {
             session_id: session.id,
             signer: signer.into(),

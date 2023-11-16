@@ -10,6 +10,7 @@ pub fn ecdsa_verify(
     pub_key: &[u8],
 ) -> Result<bool, ContractError> {
     secp256k1_verify(msg_hash, sig.as_ref(), pub_key).map_err(|err| {
+        println!("{}", err.to_string());
         ContractError::SignatureVerificationFailed {
             reason: err.to_string(),
         }

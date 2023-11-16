@@ -9,10 +9,11 @@ mod test {
     use itertools::Itertools;
 
     use k256::ecdsa::{
-        signature::Signer, signature::Verifier, Signature, SigningKey, VerifyingKey,
+        signature::Signer, signature::Verifier, signature::DigestSigner, RecoveryId, Signature, SigningKey, VerifyingKey,
     };
     use multisig::{key::PublicKey, signing};
     use rand_core::OsRng;
+    use sha3::{Digest, digest::Update};
 
     const AXL_DENOMINATION: &str = "uaxl";
     #[test]
@@ -251,8 +252,20 @@ mod test {
         }
         assert!(msg != "");
         for worker in workers_with_keys {
-            let signature : Signature = worker.1.sign(HexBinary::from_hex(&msg).unwrap().as_slice());
-            let sig : String = hex::encode(signature.to_bytes().as_slice());
+            println!("{}", HexBinary::from_hex(&msg).unwrap());
+            println!("{:?}", worker.2);
+            let msg_to_sign =
+                sha3::Keccak256::new_with_prefix(HexBinary::from_hex(&msg).unwrap().as_slice());
+            let finalized = msg_to_sign.clone().finalize();
+            println!("{:?}",finalized);
+
+            let signature : Signature =
+                worker.1.sign_digest(msg_to_sign);
+            //let signature : Signature= worker.1.sign(HexBinary::from_hex(&msg).unwrap().as_slice());
+            let sig: String = hex::encode(signature.to_bytes().as_slice());
+            let vk: VerifyingKey = VerifyingKey::from_sec1_bytes(worker.2.as_ref()).unwrap();
+
+            println!("{:?}", sig);
             app.execute_contract(
                 worker.0,
                 multisig_address.clone(),
@@ -261,7 +274,8 @@ mod test {
                     signature: HexBinary::from_hex(&sig).unwrap(),
                 },
                 &[],
-            ).unwrap();
+            )
+            .unwrap();
         }
     }
     fn register_chain(
@@ -290,7 +304,7 @@ mod test {
             println!("\nSigning key: {:x?}", hex::encode(sk));
             let verify_key = VerifyingKey::from(&signing_key);
             // Serialize with `::to_encoded_point()`
-            let vk = verify_key.to_sec1_bytes();
+            let vk = verify_key.to_encoded_point(false).to_bytes();
             let pk = HexBinary::from_hex(&hex::encode(vk)).unwrap();
             workers.push((worker, signing_key, PublicKey::Ecdsa(pk)));
         }

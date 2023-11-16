@@ -5749,6 +5749,7 @@ dependencies = [
  "axelar-wasm-std",
  "axelar-wasm-std-derive",
  "connection-router",
+ "cosmwasm-crypto",
  "cosmwasm-schema",
  "cosmwasm-std",
  "cosmwasm-storage",
@@ -5769,6 +5770,7 @@ dependencies = [
  "serde",
  "serde_json",
  "service-registry",
+ "sha3 0.10.8",
  "thiserror",
  "voting-verifier",
 ]

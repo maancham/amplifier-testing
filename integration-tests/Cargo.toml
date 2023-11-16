@@ -54,5 +54,7 @@ thiserror = { workspace = true }
 [dev-dependencies]
 cw-multi-test = "0.15.1"
 k256 = { version = "0.13.1", features = ["ecdsa"] }
+sha3 = { version = "0.10.8"}
 hex="0.4.3"
 rand_core="0.6.3"
+cosmwasm-crypto = "1.2.7"
