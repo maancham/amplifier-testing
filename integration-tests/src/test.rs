@@ -8,13 +8,17 @@ mod test {
     use cw_multi_test::{App, ContractWrapper, Executor};
     use itertools::Itertools;
 
-    use k256::ecdsa::{
+    use k256::{ecdsa::{
         signature::DigestSigner, signature::Signer, signature::Verifier, RecoveryId, Signature,
-        SigningKey, VerifyingKey,
-    };
+        SigningKey, VerifyingKey, self,
+    }, Secp256k1};
     use multisig::{key::PublicKey, signing};
     use rand_core::OsRng;
     use sha3::{digest::Update, Digest};
+    use tofn::{
+        ecdsa::{keygen, sign, KeyPair},
+        sdk::key::SecretRecoveryKey,
+    };
 
     const AXL_DENOMINATION: &str = "uaxl";
     #[test]
@@ -75,7 +79,7 @@ mod test {
                 "Ethereum".to_string().try_into().unwrap(),
                 "Polygon".to_string().try_into().unwrap(),
             ],
-            workers_with_keys.clone(),
+            &workers_with_keys,
             genesis.clone(),
         );
         let chain1 = instantiate_chain(
@@ -253,25 +257,18 @@ mod test {
         }
         assert!(msg != "");
         for worker in workers_with_keys {
-            println!("{}", HexBinary::from_hex(&msg).unwrap());
-            println!("{:?}", worker.2);
-            let msg_to_sign =
-                sha3::Keccak256::new_with_prefix(HexBinary::from_hex(&msg).unwrap().as_slice());
-            let finalized = msg_to_sign.clone().finalize();
-            println!("{:?}", finalized);
+            let msg_to_sign = HexBinary::from_hex(&msg).unwrap();
 
-            let signature: Signature = worker.1.sign_digest(msg_to_sign);
-            //let signature : Signature= worker.1.sign(HexBinary::from_hex(&msg).unwrap().as_slice());
-            let sig: String = hex::encode(signature.to_bytes().as_slice());
-            let vk: VerifyingKey = VerifyingKey::from_sec1_bytes(worker.2.as_ref()).unwrap();
+            let signature = tofn::ecdsa::sign(worker.1.signing_key(), &msg_to_sign.as_slice().try_into().unwrap()).unwrap();
 
-            println!("{:?}", sig);
+            let sig = ecdsa::Signature::from_der(&signature).unwrap();
+
             app.execute_contract(
                 worker.0,
                 multisig_address.clone(),
                 &multisig::msg::ExecuteMsg::SubmitSignature {
                     session_id: Uint64::one(),
-                    signature: HexBinary::from_hex(&sig).unwrap(),
+                    signature: HexBinary::from(sig.to_vec()),
                 },
                 &[],
             )
@@ -296,19 +293,23 @@ mod test {
         .unwrap();
     }
 
-    fn generate_keys(worker_addresses: Vec<Addr>) -> Vec<(Addr, SigningKey, PublicKey)> {
+    // return the all-zero array with the first bytes set to the bytes of `index`
+    pub fn dummy_secret_recovery_key(index: usize) -> SecretRecoveryKey {
+        let index_bytes = index.to_be_bytes();
+        let mut result = [0; 64];
+        for (i, &b) in index_bytes.iter().enumerate() {
+            result[i] = b;
+        }
+        result.as_slice().try_into().unwrap()
+    }
+
+    fn generate_keys(worker_addresses: Vec<Addr>) -> Vec<(Addr, KeyPair, PublicKey)> {
         let mut workers = vec![];
-        for worker in worker_addresses {
-            let key_pair =
-                tofn::ecdsa::keygen(&tofn::ecdsa::rng::dummy_secret_recovery_key(42), b"tofn nonce").unwrap();
-            let signing_key = SigningKey::random(&mut OsRng);
-            let sk = signing_key.to_bytes();
-            println!("\nSigning key: {:x?}", hex::encode(sk));
-            let verify_key = VerifyingKey::from(&signing_key);
-            // Serialize with `::to_encoded_point()`
-            let vk = verify_key.to_encoded_point(false).to_bytes();
+        for (idx,worker) in worker_addresses.iter().enumerate() {
+            let key_pair = tofn::ecdsa::keygen(&dummy_secret_recovery_key(idx), b"tofn nonce").unwrap();
+            let vk = key_pair.encoded_verifying_key();
             let pk = HexBinary::from_hex(&hex::encode(vk)).unwrap();
-            workers.push((worker, signing_key, PublicKey::Ecdsa(pk)));
+            workers.push((worker.clone(), key_pair, PublicKey::Ecdsa(pk)));
         }
         workers
     }
@@ -320,11 +321,11 @@ mod test {
         service_name: nonempty::String,
         governance_addr: Addr,
         chains: Vec<ChainName>,
-        workers: Vec<(Addr, SigningKey, PublicKey)>,
+        workers: &Vec<(Addr, KeyPair, PublicKey)>,
         genesis: Addr,
     ) {
         let min_worker_bond = Uint128::new(100);
-        for worker in &workers {
+        for worker in workers {
             app.send_tokens(
                 genesis.clone(),
                 worker.0.clone(),
@@ -383,7 +384,7 @@ mod test {
                 .execute_contract(
                     addr.clone(),
                     multisig.clone(),
-                    &multisig::msg::ExecuteMsg::RegisterPublicKey { public_key: pk },
+                    &multisig::msg::ExecuteMsg::RegisterPublicKey { public_key: pk.clone() },
                     &[],
                 )
                 .unwrap();
