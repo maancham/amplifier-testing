@@ -9,11 +9,12 @@ mod test {
     use itertools::Itertools;
 
     use k256::ecdsa::{
-        signature::Signer, signature::Verifier, signature::DigestSigner, RecoveryId, Signature, SigningKey, VerifyingKey,
+        signature::DigestSigner, signature::Signer, signature::Verifier, RecoveryId, Signature,
+        SigningKey, VerifyingKey,
     };
     use multisig::{key::PublicKey, signing};
     use rand_core::OsRng;
-    use sha3::{Digest, digest::Update};
+    use sha3::{digest::Update, Digest};
 
     const AXL_DENOMINATION: &str = "uaxl";
     #[test]
@@ -257,10 +258,9 @@ mod test {
             let msg_to_sign =
                 sha3::Keccak256::new_with_prefix(HexBinary::from_hex(&msg).unwrap().as_slice());
             let finalized = msg_to_sign.clone().finalize();
-            println!("{:?}",finalized);
+            println!("{:?}", finalized);
 
-            let signature : Signature =
-                worker.1.sign_digest(msg_to_sign);
+            let signature: Signature = worker.1.sign_digest(msg_to_sign);
             //let signature : Signature= worker.1.sign(HexBinary::from_hex(&msg).unwrap().as_slice());
             let sig: String = hex::encode(signature.to_bytes().as_slice());
             let vk: VerifyingKey = VerifyingKey::from_sec1_bytes(worker.2.as_ref()).unwrap();
@@ -299,6 +299,8 @@ mod test {
     fn generate_keys(worker_addresses: Vec<Addr>) -> Vec<(Addr, SigningKey, PublicKey)> {
         let mut workers = vec![];
         for worker in worker_addresses {
+            let key_pair =
+                tofn::ecdsa::keygen(&tofn::ecdsa::rng::dummy_secret_recovery_key(42), b"tofn nonce").unwrap();
             let signing_key = SigningKey::random(&mut OsRng);
             let sk = signing_key.to_bytes();
             println!("\nSigning key: {:x?}", hex::encode(sk));

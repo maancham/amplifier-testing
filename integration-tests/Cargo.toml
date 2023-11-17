@@ -58,3 +58,4 @@ sha3 = { version = "0.10.8"}
 hex="0.4.3"
 rand_core="0.6.3"
 cosmwasm-crypto = "1.2.7"
+tofn = { git = "https://github.com/axelarnetwork/tofn.git", branch = "update-deps"}
