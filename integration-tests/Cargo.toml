@@ -54,3 +54,4 @@ voting-verifier = { workspace = true }
 [dev-dependencies]
 cw-multi-test = "0.15.1"
 tofn = { git = "https://github.com/axelarnetwork/tofn.git", branch = "update-deps" }
+k256 = { version = "0.13.1", features = ["ecdsa"] }

@@ -2,16 +2,19 @@
 mod test {
 
     use axelar_wasm_std::nonempty;
-    use connection_router::state::ChainName;
-    use cosmwasm_std::{coins, Addr, Binary, Deps, Env, HexBinary, StdResult, Uint128, Uint256};
+    use connection_router::state::{ChainName, CrossChainId, Message};
+    use cosmwasm_std::{
+        coins, Addr, Binary, BlockInfo, Deps, Env, HexBinary, StdResult, Uint128, Uint256, Uint64,
+    };
     use cw_multi_test::{App, ContractWrapper, Executor};
 
+    use k256::ecdsa;
     use multisig::key::PublicKey;
     use tofn::ecdsa::KeyPair;
 
     const AXL_DENOMINATION: &str = "uaxl";
     #[test]
-    fn test_protocol_setup() {
+    fn test_basic_message_flow() {
         let mut protocol = setup_protocol("validators".to_string().try_into().unwrap());
         let chains = vec![
             "Ethereum".to_string().try_into().unwrap(),
@@ -38,7 +41,7 @@ mod test {
             &workers,
             protocol.genesis.clone(),
         );
-        let _chain1 = setup_chain(
+        let chain1 = setup_chain(
             &mut protocol.app,
             protocol.router_address.clone(),
             protocol.service_registry_address.clone(),
@@ -49,7 +52,7 @@ mod test {
             protocol.service_name.clone(),
             chains.get(0).unwrap().clone(),
         );
-        let _chain2 = setup_chain(
+        let chain2 = setup_chain(
             &mut protocol.app,
             protocol.router_address.clone(),
             protocol.service_registry_address.clone(),
@@ -60,6 +63,207 @@ mod test {
             protocol.service_name.clone(),
             chains.get(1).unwrap().clone(),
         );
+
+        let msg = Message {
+            cc_id: CrossChainId {
+                chain: chain1.chain_name.clone(),
+                id: "0x88d7956fd7b6fcec846548d83bd25727f2585b4be3add21438ae9fbb34625924:3"
+                    .to_string()
+                    .try_into()
+                    .unwrap(),
+            },
+            source_address: "0xBf12773B49()0e1Deb57039061AAcFA2A87DEaC9b9"
+                .to_string()
+                .try_into()
+                .unwrap(),
+            destination_address: "0xce16F69375520ab01377ce7B88f5BA8C48F8D666"
+                .to_string()
+                .try_into()
+                .unwrap(),
+            destination_chain: chain2.chain_name,
+            payload_hash: HexBinary::from_hex(
+                "3e50a012285f8e7ec59b558179cd546c55c477ebe16202aac7d7747e25be03be",
+            )
+            .unwrap()
+            .as_slice()
+            .try_into()
+            .unwrap(),
+        };
+        let relayer = Addr::unchecked("relayer");
+
+        protocol
+            .app
+            .execute_contract(
+                relayer.clone(),
+                chain1.gateway_address.clone(),
+                &gateway::msg::ExecuteMsg::VerifyMessages(vec![msg.clone()]),
+                &[],
+            )
+            .unwrap();
+
+        for worker in &workers {
+            protocol
+                .app
+                .execute_contract(
+                    worker.addr.clone(),
+                    chain1.voting_verifier_address.clone(),
+                    &voting_verifier::msg::ExecuteMsg::Vote {
+                        poll_id: Uint64::one().into(),
+                        votes: vec![true],
+                    },
+                    &[],
+                )
+                .unwrap();
+        }
+
+        protocol
+            .app
+            .execute_contract(
+                relayer.clone(),
+                chain1.voting_verifier_address.clone(),
+                &voting_verifier::msg::ExecuteMsg::EndPoll {
+                    poll_id: Uint64::one().into(),
+                },
+                &[],
+            )
+            .unwrap();
+
+        protocol
+            .app
+            .execute_contract(
+                relayer.clone(),
+                chain1.gateway_address.clone(),
+                &gateway::msg::ExecuteMsg::RouteMessages(vec![msg.clone()]),
+                &[],
+            )
+            .unwrap();
+
+        let messages: Vec<Message> = protocol
+            .app
+            .wrap()
+            .query_wasm_smart(
+                chain2.gateway_address,
+                &gateway::msg::QueryMsg::GetMessages {
+                    message_ids: vec![msg.cc_id.clone()],
+                },
+            )
+            .unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages.get(0), Some(&msg));
+
+        let res = protocol
+            .app
+            .execute_contract(
+                relayer.clone(),
+                chain2.multisig_prover_address.clone(),
+                &multisig_prover::msg::ExecuteMsg::ConstructProof {
+                    message_ids: vec![msg.cc_id.to_string()],
+                },
+                &[],
+            )
+            .unwrap();
+
+        let mut msg_to_sign = "".to_string();
+        for event in res.events {
+            let attr = event.attributes.iter().find(|attr| attr.key == "msg");
+            if attr.is_some() {
+                msg_to_sign = attr.clone().unwrap().value.clone();
+            }
+        }
+        assert!(msg_to_sign != "");
+        for worker in &workers {
+            let signature = tofn::ecdsa::sign(
+                worker.key_pair.signing_key(),
+                &HexBinary::from_hex(&msg_to_sign)
+                    .unwrap()
+                    .as_slice()
+                    .try_into()
+                    .unwrap(),
+            )
+            .unwrap();
+
+            let sig = ecdsa::Signature::from_der(&signature).unwrap();
+
+            protocol
+                .app
+                .execute_contract(
+                    worker.addr.clone(),
+                    protocol.multisig_address.clone(),
+                    &multisig::msg::ExecuteMsg::SubmitSignature {
+                        session_id: Uint64::one(),
+                        signature: HexBinary::from(sig.to_vec()),
+                    },
+                    &[],
+                )
+                .unwrap();
+        }
+
+        let proof_response: multisig_prover::msg::GetProofResponse = protocol
+            .app
+            .wrap()
+            .query_wasm_smart(
+                &chain2.multisig_prover_address,
+                &multisig_prover::msg::QueryMsg::GetProof {
+                    multisig_session_id: Uint64::one(),
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            proof_response.status,
+            multisig_prover::msg::ProofStatus::Completed { execute_data }
+        ));
+        assert_eq!(proof_response.message_ids, vec![msg.cc_id.to_string()]);
+
+        let old_block = protocol.app.block_info();
+        protocol.app.set_block(BlockInfo {
+            height: old_block.height + 20,
+            ..old_block
+        });
+
+        let res = protocol
+            .app
+            .execute_contract(
+                relayer.clone(),
+                protocol.rewards_address.clone(),
+                &rewards::msg::ExecuteMsg::DistributeRewards {
+                    contract_address: chain1.voting_verifier_address.to_string(),
+                    epoch_count: None,
+                },
+                &[],
+            )
+            .unwrap();
+
+        println!("{:?}", res);
+        for worker in &workers {
+            let balance = protocol
+                .app
+                .wrap()
+                .query_balance(&worker.addr, AXL_DENOMINATION)
+                .unwrap();
+            assert_eq!(balance.amount, Uint128::from(50u128));
+        }
+
+        let res = protocol
+            .app
+            .execute_contract(
+                relayer,
+                protocol.rewards_address,
+                &rewards::msg::ExecuteMsg::DistributeRewards {
+                    contract_address: protocol.multisig_address.to_string(),
+                    epoch_count: None,
+                },
+                &[],
+            )
+            .unwrap();
+        println!("{:?}", res);
+        for worker in workers {
+            let balance = protocol
+                .app
+                .wrap()
+                .query_balance(worker.addr, AXL_DENOMINATION)
+                .unwrap();
+            assert_eq!(balance.amount, Uint128::from(100u128));
+        }
     }
 
     #[allow(dead_code)]
@@ -119,6 +323,15 @@ mod test {
                 governance_account: governance_address.to_string(),
             },
         );
+        app.execute_contract(
+            genesis.clone(),
+            rewards_address.clone(),
+            &rewards::msg::ExecuteMsg::AddRewards {
+                contract_address: multisig_address.to_string(),
+            },
+            &coins(1000, AXL_DENOMINATION),
+        )
+        .unwrap();
 
         Protocol {
             genesis,
@@ -321,16 +534,6 @@ mod test {
             rewards_address.clone(),
             &rewards::msg::ExecuteMsg::AddRewards {
                 contract_address: voting_verifier_address.to_string(),
-            },
-            &coins(1000, AXL_DENOMINATION),
-        )
-        .unwrap();
-
-        app.execute_contract(
-            genesis_address,
-            rewards_address.clone(),
-            &rewards::msg::ExecuteMsg::AddRewards {
-                contract_address: multisig_prover_address.to_string(),
             },
             &coins(1000, AXL_DENOMINATION),
         )
