@@ -125,6 +125,7 @@ where
     T: Broadcaster,
 {
     event_sub: event_sub::EventSub<tendermint_rpc::HttpClient>,
+    tm_client: tendermint_rpc::HttpClient,
     event_processor: EventProcessor,
     broadcaster: QueuedBroadcaster<T>,
     #[allow(dead_code)]
@@ -148,7 +149,7 @@ where
     ) -> Self {
         let token = CancellationToken::new();
 
-        let event_sub = event_sub::EventSub::new(tm_client, event_buffer_cap, token.child_token());
+        let event_sub = event_sub::EventSub::new(tm_client.clone(), event_buffer_cap, token.child_token());
         let event_sub = match state_updater.state().min_handler_block_height() {
             Some(min_height) => event_sub.start_from(min_height.increment()),
             None => event_sub,
@@ -170,6 +171,7 @@ where
             state_updater,
             ecdsa_client,
             token,
+            tm_client
         }
     }
 
@@ -192,6 +194,7 @@ where
                         json_rpc::Client::new_http(&chain.rpc_url)
                             .change_context(Error::Connection)?,
                         self.broadcaster.client(),
+                        self.tm_client.clone()
                     ),
                 ),
                 handlers::config::Config::EvmWorkerSetVerifier {

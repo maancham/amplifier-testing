@@ -25,6 +25,8 @@ use crate::handlers::errors::Error::DeserializeEvent;
 use crate::queue::queued_broadcaster::BroadcasterClient;
 use crate::types::{EVMAddress, Hash, TMAddress};
 
+use crate::tm_client::TmClient;
+
 type Result<T> = error_stack::Result<T, Error>;
 
 #[derive(Deserialize, Debug)]
@@ -46,26 +48,30 @@ struct PollStartedEvent {
     source_chain: connection_router::state::ChainName,
     source_gateway_address: EVMAddress,
     confirmation_height: u64,
+    expires_at: u64,
     messages: Vec<Message>,
     participants: Vec<TMAddress>,
 }
 
-pub struct Handler<C, B>
+pub struct Handler<C, B, T>
 where
     C: EthereumClient,
     B: BroadcasterClient,
+    T: TmClient
 {
     worker: TMAddress,
     voting_verifier: TMAddress,
     chain: ChainName,
     rpc_client: C,
     broadcast_client: B,
+    tendermint_client: T,
 }
 
-impl<C, B> Handler<C, B>
+impl<C, B, Tm> Handler<C, B, Tm>
 where
     C: EthereumClient + Send + Sync,
     B: BroadcasterClient,
+    Tm: TmClient
 {
     pub fn new(
         worker: TMAddress,
@@ -73,6 +79,7 @@ where
         chain: ChainName,
         rpc_client: C,
         broadcast_client: B,
+        tendermint_client: Tm,
     ) -> Self {
         Self {
             worker,
@@ -80,6 +87,7 @@ where
             chain,
             rpc_client,
             broadcast_client,
+            tendermint_client
         }
     }
 
@@ -130,18 +138,20 @@ where
             funds: vec![],
         };
 
-        self.broadcast_client
+        let res = self.broadcast_client
             .broadcast(tx)
-            .await
-            .change_context(Error::Broadcaster)
+            .await;
+        println!("{:?}",res);
+        res.change_context(Error::Broadcaster)
     }
 }
 
 #[async_trait]
-impl<C, B> EventHandler for Handler<C, B>
+impl<C, B, Tm> EventHandler for Handler<C, B, Tm>
 where
     C: EthereumClient + Send + Sync,
     B: BroadcasterClient + Send + Sync,
+    Tm: TmClient + Send + Sync,
 {
     type Err = Error;
 
@@ -153,6 +163,7 @@ where
             source_gateway_address,
             messages,
             confirmation_height,
+            expires_at,
             participants,
         } = match event.try_into() as error_stack::Result<_, _> {
             Err(report) if matches!(report.current_context(), EventTypeMismatch(_)) => {
@@ -170,6 +181,12 @@ where
         }
 
         if !participants.contains(&self.worker) {
+            return Ok(());
+        }
+
+        let latest_block = self.tendermint_client.latest_block().await.change_context(Error::Block)?.block.header.height;
+        if u64::from(latest_block) > expires_at {
+            info!("Skipping expired poll. poll_id:  {} expired_at: {}", poll_id, expires_at);
             return Ok(());
         }
 

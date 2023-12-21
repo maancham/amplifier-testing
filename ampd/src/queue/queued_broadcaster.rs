@@ -9,8 +9,10 @@ use tokio::time;
 use tokio::{select, sync::mpsc};
 use tracing::info;
 
+use axelar_wasm_std::voting;
 use super::msg_queue::MsgQueue;
 use crate::broadcaster::Broadcaster;
+use std::error::Error as StdError;
 
 type Result<T = ()> = error_stack::Result<T, Error>;
 
@@ -118,7 +120,26 @@ where
               msg = rx.recv() => match msg {
                 None => break,
                 Some(msg) => {
-                  let fee = broadcaster.estimate_fee(vec![msg.clone()]).await.change_context(Error::EstimateFee)?;
+                  let res = broadcaster.estimate_fee(vec![msg.clone()]).await.change_context(Error::EstimateFee);
+                  info!("error is {:?}",res);
+                  let fee = match res {
+                    Ok(fee) => Ok(fee),
+                    Err(err) => {
+
+                        let mut frames = err.frames();
+                        info!("frames {:?}", frames);
+                        let frame = frames.find(|f| f.is::<tonic::Status>());
+                        info!("frame {:?}", frame);
+                        let e = frame.unwrap().downcast_ref::<tonic::Status>();
+                        info!("e {:?}",e);
+                        info!("string {:?}",voting::Error::PollExpired.to_string());
+                        let contains = e.unwrap().message().contains(&voting::Error::PollExpired.to_string());
+                        info!("contains {:?}", contains);
+
+                        Err(err)
+                    }
+                  }?;
+
 
                   if fee.gas_limit + queue.gas_cost() >= self.batch_gas_limit {
                     interval.reset();
