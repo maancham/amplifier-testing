@@ -1,8 +1,11 @@
+use std::time::Duration;
+
 use async_trait::async_trait;
 use error_stack::{Report, Result};
 use mockall::automock;
 use tendermint::block::Height;
 use tendermint_rpc::{Client, HttpClient};
+use tokio::time;
 
 pub type BlockResultsResponse = tendermint_rpc::endpoint::block_results::Response;
 pub type BlockResponse = tendermint_rpc::endpoint::block::Response;
@@ -18,12 +21,16 @@ pub trait TmClient {
 #[async_trait]
 impl TmClient for HttpClient {
     async fn latest_block(&self) -> Result<BlockResponse, Error> {
-        Client::latest_block(self).await.map_err(Report::from)
+        time::timeout(Duration::from_millis(2000), Client::latest_block(self))
+            .await
+            .unwrap()
+            .map_err(Report::from)
     }
 
     async fn block_results(&self, height: Height) -> Result<BlockResultsResponse, Error> {
-        Client::block_results(self, height)
+        time::timeout(Duration::from_millis(2000), Client::block_results(self, height))
             .await
+            .unwrap()
             .map_err(Report::from)
     }
 }

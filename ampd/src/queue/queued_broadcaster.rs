@@ -118,7 +118,9 @@ where
               msg = rx.recv() => match msg {
                 None => break,
                 Some(msg) => {
+                  info!("estimating gas");
                   let fee = broadcaster.estimate_fee(vec![msg.clone()]).await.change_context(Error::EstimateFee)?;
+                  info!("estimated gas");
 
                   if fee.gas_limit + queue.gas_cost() >= self.batch_gas_limit {
                     interval.reset();
@@ -159,18 +161,22 @@ async fn broadcast_all<T>(queue: &mut MsgQueue, broadcaster: &mut T) -> Result
 where
     T: Broadcaster,
 {
+    info!("ready to broadcast");
     let msgs = queue.pop_all();
+    info!("msgs length {:?}", msgs.len());
 
     match msgs.len() {
         0 => Ok(()),
         n => {
             info!(message_count = n, "ready to broadcast messages");
 
-            broadcaster
+            let fut = broadcaster
                 .broadcast(msgs)
                 .await
                 .map(|_| ())
-                .change_context(Error::Broadcast)
+                .change_context(Error::Broadcast)?;
+            info!("broadcasted msgs");
+            Ok(fut)
         }
     }
 }

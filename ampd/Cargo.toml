@@ -51,6 +51,7 @@ tendermint-rpc = { git = "https://github.com/axelarnetwork/tendermint-rs.git", b
 thiserror = { workspace = true }
 tokio = { version = "1.22.0", features = ["signal", "time"] }
 tokio-stream = { version = "0.1.11", features = ["sync"] }
+tokio-timer = "0.2.13"
 tokio-util = "0.7.8"
 toml = "0.5.9"
 tonic = "0.8.3"
