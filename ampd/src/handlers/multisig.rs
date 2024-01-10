@@ -127,6 +127,7 @@ where
     type Err = Error;
 
     async fn handle(&self, event: &events::Event) -> error_stack::Result<(), Error> {
+        info!("handler {:?}", event);
         let SigningStartedEvent {
             contract_address,
             session_id,

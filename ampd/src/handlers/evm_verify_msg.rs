@@ -96,12 +96,14 @@ where
     where
         T: IntoIterator<Item = Hash>,
     {
+        info!("getting finalized block height");
         let latest_finalized_block_height = self
             .chain
             .finalizer(&self.rpc_client, confirmation_height)
             .latest_finalized_block_height()
             .await
             .change_context(Error::Finalizer)?;
+        info!("got finalized block height");
 
         Ok(join_all(
             tx_hashes
@@ -151,6 +153,7 @@ where
     type Err = Error;
 
     async fn handle(&self, event: &events::Event) -> Result<()> {
+        info!("handler handling event {:?}", event);
         let PollStartedEvent {
             contract_address,
             poll_id,
@@ -162,10 +165,13 @@ where
             participants,
         } = match event.try_into() as error_stack::Result<_, _> {
             Err(report) if matches!(report.current_context(), EventTypeMismatch(_)) => {
+                info!("handler wrong event type");
                 return Ok(())
             }
             event => event.change_context(DeserializeEvent)?,
         };
+
+        info!("handling event. doing checks");
 
         if self.voting_verifier != contract_address {
             return Ok(());
@@ -179,17 +185,21 @@ where
             return Ok(());
         }
 
+        info!("handling event. checking latest block height");
         let latest_block_height = *self.latest_block_height.borrow();
         if latest_block_height >= expires_at {
             info!(poll_id = poll_id.to_string(), "skipping expired poll");
             return Ok(());
         }
 
+        info!("handling event. checks passed, making rpc calls");
+
         let tx_hashes: HashSet<_> = messages.iter().map(|message| message.tx_id).collect();
         let finalized_tx_receipts = self
             .finalized_tx_receipts(tx_hashes, confirmation_height)
             .await?;
 
+        info!("handling event. got tx receipts");
         let poll_id_str: String = poll_id.into();
         let source_chain_str: String = source_chain.into();
         let message_ids = messages

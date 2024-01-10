@@ -64,6 +64,7 @@ impl<T: TmClient + Sync> EventSub<T> {
         };
         let mut interval = time::interval(self.poll_interval);
 
+        info!("event sub running");
         loop {
             select! {
                 _ = interval.tick() => {
@@ -95,6 +96,7 @@ impl<T: TmClient + Sync> EventSub<T> {
     ) -> Result<block::Height, EventSubError> {
         let mut height = from;
         let to = self.latest_block_height().await?;
+        info!("processing blocks from");
 
         while height <= to {
             self.process_block(height)
@@ -112,6 +114,7 @@ impl<T: TmClient + Sync> EventSub<T> {
     }
 
     async fn process_block(&self, height: block::Height) -> Result<(), EventSubError> {
+        info!("process block {:?}", height);
         let events = iter::once(Event::BlockBegin(height))
             .chain(
                 self.events(height)
@@ -158,6 +161,7 @@ pub fn skip_to_block<E>(
     stream: impl Stream<Item = Result<Event, E>>,
     height: block::Height,
 ) -> impl Stream<Item = Result<Event, E>> {
+    info!("skipping to block");
     stream.skip_while(move |event| !matches!(event, Ok(Event::BlockBegin(h)) if *h >= height))
 }
 

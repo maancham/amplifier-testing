@@ -53,6 +53,7 @@ impl<T: TmClient + Sync> BlockHeightMonitor<T> {
             select! {
                 _ = interval.tick() => {
                     let latest_block = self.client.latest_block().await.change_context(BlockHeightMonitorError::LatestBlock)?;
+                    info!("publishing latest block {:?}", latest_block.block.header.height);
                     self.latest_height_tx.send(latest_block.block.header.height.into()).expect("failed to publish latest block height");
                 },
                 _ = token.cancelled() => {

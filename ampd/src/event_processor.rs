@@ -9,6 +9,7 @@ use futures::{future::try_join_all, StreamExt};
 use thiserror::Error;
 use tokio_stream::Stream;
 use tokio_util::sync::CancellationToken;
+use tracing::info;
 
 use crate::handlers::chain;
 
@@ -37,25 +38,31 @@ pub enum EventProcessorError {
     EventStreamError,
 }
 
-fn consume_events<H, S, E>(event_stream: S, handler: H, token: CancellationToken) -> Task
+fn consume_events<H, S, E, L>(event_stream: S, label: L, handler: H, token: CancellationToken) -> Task
 where
     H: EventHandler + Send + Sync + 'static,
     S: Stream<Item = Result<Event, E>> + Send + 'static,
     E: Context,
+    L: AsRef<str> + Send + 'static,
 {
     let task = async move {
         let mut event_stream = Box::pin(event_stream);
         while let Some(res) = event_stream.next().await {
+            info!("got event. label {:?}", label.as_ref());
             let event = res.change_context(EventProcessorError::EventStreamError)?;
+            info!("handling event. event {:?}, label {:?}", event, label.as_ref());
 
             handler
                 .handle(&event)
                 .await
                 .change_context(EventProcessorError::EventHandlerError)?;
+            info!("handled event. label {:?}", label.as_ref());
 
             if matches!(event, Event::BlockEnd(_)) && token.is_cancelled() {
+                info!("breaking in consume events. label {:?}", label.as_ref());
                 break;
             }
+            info!("waiting for next event. label {:?}", label.as_ref());
         }
 
         Ok(())
@@ -77,14 +84,15 @@ impl EventProcessor {
         }
     }
 
-    pub fn add_handler<H, S, E>(&mut self, handler: H, event_stream: S) -> &mut Self
+    pub fn add_handler<H, S, E, L>(&mut self, label: L, handler: H, event_stream: S) -> &mut Self
     where
         H: EventHandler + Send + Sync + 'static,
         S: Stream<Item = Result<Event, E>> + Send + 'static,
         E: Context,
+        L: AsRef<str> + Send + 'static,
     {
         self.tasks
-            .push(consume_events(event_stream, handler, self.token.child_token()).into());
+            .push(consume_events(event_stream, label, handler, self.token.child_token()).into());
         self
     }
 
@@ -131,7 +139,7 @@ mod tests {
             }
         });
 
-        processor.add_handler(handler, BroadcastStream::new(rx).map_err(Report::from));
+        processor.add_handler("foo", handler, BroadcastStream::new(rx).map_err(Report::from));
         assert!(processor.run().await.is_ok());
     }
 
@@ -151,7 +159,7 @@ mod tests {
             assert!(tx.send(events::Event::BlockEnd((10_u32).into())).is_ok());
         });
 
-        processor.add_handler(handler, BroadcastStream::new(rx).map_err(Report::from));
+        processor.add_handler("foo", handler, BroadcastStream::new(rx).map_err(Report::from));
         assert!(processor.run().await.is_err());
     }
 
@@ -183,8 +191,8 @@ mod tests {
         });
 
         processor
-            .add_handler(handler, stream)
-            .add_handler(another_handler, another_stream);
+            .add_handler("foo", handler, stream)
+            .add_handler("foo", another_handler, another_stream);
         assert!(processor.run().await.is_ok());
     }
 

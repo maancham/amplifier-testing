@@ -5,6 +5,7 @@ use events::Event;
 use tendermint::block;
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver};
+use tracing::info;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -35,6 +36,7 @@ impl EventHandler for Handler {
     type Err = Error;
 
     async fn handle(&self, event: &Event) -> Result<(), Error> {
+        info!("handler {:?}", event);
         match event {
             Event::BlockEnd(height) => self.tx.send(*height).await.change_context(Error::SendError),
             _ => Ok(()),

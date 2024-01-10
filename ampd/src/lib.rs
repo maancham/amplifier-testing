@@ -48,6 +48,7 @@ type HandlerStream<E> = Pin<Box<dyn Stream<Item = Result<Event, E>> + Send>>;
 
 pub async fn run(cfg: Config, state: State) -> (State, Result<(), Error>) {
     let app = prepare_app(cfg, state.clone()).await;
+    info!("prepared app fully");
 
     match app {
         Ok(app) => app.run().await,
@@ -56,6 +57,7 @@ pub async fn run(cfg: Config, state: State) -> (State, Result<(), Error>) {
 }
 
 async fn prepare_app(cfg: Config, state: State) -> Result<App<impl Broadcaster>, Error> {
+    info!("preparing app");
     let Config {
         tm_jsonrpc,
         tm_grpc,
@@ -66,14 +68,19 @@ async fn prepare_app(cfg: Config, state: State) -> Result<App<impl Broadcaster>,
         service_registry: _service_registry,
     } = cfg;
 
+    info!("connecting to tendermint client");
     let tm_client = tendermint_rpc::HttpClient::new(tm_jsonrpc.to_string().as_str())
         .change_context(Error::Connection)?;
+    info!("connecting to service client");
     let service_client = ServiceClient::connect(tm_grpc.to_string())
         .await
         .change_context(Error::Connection)?;
+
+    info!("connecting to query client");
     let query_client = QueryClient::connect(tm_grpc.to_string())
         .await
         .change_context(Error::Connection)?;
+    info!("connecting to multisig client");
     let multisig_client = MultisigClient::connect(tofnd_config.party_uid, tofnd_config.url)
         .await
         .change_context(Error::Connection)?;
@@ -115,6 +122,7 @@ async fn prepare_app(cfg: Config, state: State) -> Result<App<impl Broadcaster>,
         .build()
         .change_context(Error::Broadcaster)?;
 
+    info!("prepared app, configuring handlers");
     App::new(
         tm_client,
         broadcaster,
@@ -189,6 +197,7 @@ where
         handler_configs: Vec<handlers::config::Config>,
     ) -> Result<App<T>, Error> {
         for config in handler_configs {
+            info!("configuring handler {:?}", config);
             match config {
                 handlers::config::Config::EvmMsgVerifier {
                     chain,
@@ -258,13 +267,14 @@ where
                 ),
             }
         }
+        info!("configured handlers");
 
         Ok(self)
     }
 
     fn configure_handler<L, H>(&mut self, label: L, handler: H)
     where
-        L: AsRef<str>,
+        L: AsRef<str> + Send + 'static,
         H: EventHandler + Send + Sync + 'static,
     {
         let (handler, rx) = handlers::end_block::with_block_height_notifier(handler);
@@ -281,7 +291,8 @@ where
                 completed_height.increment(),
             )),
         };
-        self.event_processor.add_handler(handler, sub);
+        info!("adding handler to event processor");
+        self.event_processor.add_handler(label,handler, sub);
     }
 
     async fn run(self) -> (State, Result<(), Error>) {
@@ -294,6 +305,7 @@ where
             token,
             ..
         } = self;
+        info!("running");
 
         let exit_token = token.clone();
         tokio::spawn(async move {

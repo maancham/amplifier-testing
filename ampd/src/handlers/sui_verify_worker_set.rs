@@ -110,6 +110,7 @@ where
     type Err = Error;
 
     async fn handle(&self, event: &Event) -> error_stack::Result<(), Error> {
+        info!("handler {:?}", event);
         let PollStartedEvent {
             contract_address,
             poll_id,

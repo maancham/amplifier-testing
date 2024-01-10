@@ -101,7 +101,7 @@ pub fn load(path: impl AsRef<Path>) -> Result<State, Error> {
 }
 
 pub fn flush(state: &State, path: impl AsRef<Path>) -> Result<(), Error> {
-    info!("persisting state to disk");
+    info!("persisting state to disk. path {:?}, state {:?}", path.as_ref().to_str(), state);
 
     let state = serde_json::to_string(state).change_context(Error::SerializationFailure)?;
     ensure_parent_dirs_exist(&path)?;

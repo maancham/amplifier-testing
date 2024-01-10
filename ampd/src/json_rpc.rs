@@ -1,7 +1,10 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, time::Duration};
 
 use error_stack::Report;
-use ethers::providers::{Http, JsonRpcClient, ProviderError};
+use ethers::providers::{
+    Http, HttpRateLimitRetryPolicy, JsonRpcClient, ProviderError, RetryClient, RetryClientBuilder,
+    RpcError,
+};
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::url::Url;
@@ -38,6 +41,13 @@ where
 
 impl Client<Http> {
     pub fn new_http(url: &Url) -> Result<Self> {
-        Ok(Client::new(Http::new(url)))
+        Ok(Client::new(Http::new_with_client(
+            url,
+            reqwest::Client::builder()
+                .timeout(Duration::from_millis(2000))
+                .connect_timeout(Duration::from_millis(2000))
+                .build()
+                .unwrap(),
+        )))
     }
 }

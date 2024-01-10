@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use error_stack::{Result, ResultExt};
 use events::Event;
 use thiserror::Error;
+use tracing::info;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -41,10 +42,13 @@ where
     type Err = Error;
 
     async fn handle(&self, event: &Event) -> Result<(), Error> {
+        info!("handler1 {:?}", event);
+
         self.handler_1
             .handle(event)
             .await
             .change_context(Error::ChainError)?;
+        info!("handler2 {:?}", event);
         self.handler_2
             .handle(event)
             .await
