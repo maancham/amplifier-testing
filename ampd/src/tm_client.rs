@@ -23,14 +23,14 @@ impl TmClient for HttpClient {
     async fn latest_block(&self) -> Result<BlockResponse, Error> {
         time::timeout(Duration::from_millis(2000), Client::latest_block(self))
             .await
-            .unwrap()
+            .expect("latest_block timed out")
             .map_err(Report::from)
     }
 
     async fn block_results(&self, height: Height) -> Result<BlockResultsResponse, Error> {
         time::timeout(Duration::from_millis(2000), Client::block_results(self, height))
             .await
-            .unwrap()
+            .expect("block_results timed out")
             .map_err(Report::from)
     }
 }
