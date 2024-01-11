@@ -8,6 +8,7 @@ use ethers::providers::{
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::url::Url;
+use tokio::time;
 
 type Result<T> = error_stack::Result<T, ProviderError>;
 
@@ -31,23 +32,19 @@ where
         T: Debug + Serialize + Send + Sync,
         R: DeserializeOwned + Send,
     {
-        self.provider
-            .request(method, params)
-            .await
-            .map_err(Into::into)
-            .map_err(Report::from)
+        time::timeout(
+            Duration::from_millis(2000),
+            self.provider.request(method, params),
+        )
+        .await
+        .expect("eth json RPC timed out")
+        .map_err(Into::into)
+        .map_err(Report::from)
     }
 }
 
 impl Client<Http> {
     pub fn new_http(url: &Url) -> Result<Self> {
-        Ok(Client::new(Http::new_with_client(
-            url,
-            reqwest::Client::builder()
-                .timeout(Duration::from_millis(2000))
-                .connect_timeout(Duration::from_millis(2000))
-                .build()
-                .unwrap(),
-        )))
+        Ok(Client::new(Http::new(url)))
     }
 }
