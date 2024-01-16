@@ -292,7 +292,7 @@ where
             )),
         };
         info!("adding handler to event processor");
-        self.event_processor.add_handler(label,handler, sub);
+        self.event_processor.add_handler(label, handler, sub);
     }
 
     async fn run(self) -> (State, Result<(), Error>) {

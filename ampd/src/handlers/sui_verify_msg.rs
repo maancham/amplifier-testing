@@ -102,10 +102,7 @@ where
     type Err = Error;
 
     async fn handle(&self, event: &Event) -> Result<()> {
-        info!(
-            "handler handling event {:?}",
-            event,
-        );
+        info!("handler handling event {:?}", event,);
         let PollStartedEvent {
             contract_address,
             poll_id,

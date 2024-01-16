@@ -152,6 +152,7 @@ where
 
         match pub_keys.get(&self.worker) {
             Some(pub_key) => {
+                info!("gettting signature");
                 let signature = self
                     .signer
                     .sign(self.multisig.to_string().as_str(), msg.clone(), pub_key)

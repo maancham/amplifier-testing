@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use ecdsa::VerifyingKey;
@@ -6,6 +7,7 @@ use error_stack::ResultExt;
 use k256::Secp256k1;
 use mockall::automock;
 use tokio::sync::Mutex;
+use tokio::time;
 use tonic::{transport::Channel, Status};
 
 use super::proto::{
@@ -14,6 +16,7 @@ use super::proto::{
 };
 use super::{error::Error, error::TofndError, MessageDigest, Signature};
 use crate::{types::PublicKey, url::Url};
+use tracing::info;
 
 type Result<T> = error_stack::Result<T, Error>;
 
@@ -88,11 +91,13 @@ impl EcdsaClient for MultisigClient {
             party_uid: self.party_uid.to_string(),
             pub_key: pub_key.to_bytes(),
         };
+        info!("sending sign request");
 
-        self.client
-            .sign(request)
+        time::timeout(Duration::from_millis(3000), self.client.sign(request))
             .await
+            .expect("tofnd sign request timed out")
             .and_then(|response| {
+                info!("got sign response");
                 response
                     .into_inner()
                     .sign_response
@@ -101,12 +106,14 @@ impl EcdsaClient for MultisigClient {
             .change_context(Error::Grpc)
             .and_then(|response| match response {
                 SignResponse::Signature(signature) => {
+                    info!("got signature");
                     ecdsa::Signature::<Secp256k1>::from_der(&signature)
                         .change_context(Error::ParsingFailed)
                         .map(|sig| sig.to_vec())
                         .map(Into::into)
                 }
                 SignResponse::Error(error_msg) => {
+                    info!("got signing error {:?}", error_msg);
                     Err(TofndError::ExecutionFailed(error_msg)).change_context(Error::SignFailed)
                 }
             })

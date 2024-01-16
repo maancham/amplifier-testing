@@ -166,7 +166,7 @@ where
         } = match event.try_into() as error_stack::Result<_, _> {
             Err(report) if matches!(report.current_context(), EventTypeMismatch(_)) => {
                 info!("handler wrong event type");
-                return Ok(())
+                return Ok(());
             }
             event => event.change_context(DeserializeEvent)?,
         };

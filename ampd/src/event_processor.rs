@@ -38,7 +38,12 @@ pub enum EventProcessorError {
     EventStreamError,
 }
 
-fn consume_events<H, S, E, L>(event_stream: S, label: L, handler: H, token: CancellationToken) -> Task
+fn consume_events<H, S, E, L>(
+    event_stream: S,
+    label: L,
+    handler: H,
+    token: CancellationToken,
+) -> Task
 where
     H: EventHandler + Send + Sync + 'static,
     S: Stream<Item = Result<Event, E>> + Send + 'static,
@@ -50,7 +55,11 @@ where
         while let Some(res) = event_stream.next().await {
             info!("got event. label {:?}", label.as_ref());
             let event = res.change_context(EventProcessorError::EventStreamError)?;
-            info!("handling event. event {:?}, label {:?}", event, label.as_ref());
+            info!(
+                "handling event. event {:?}, label {:?}",
+                event,
+                label.as_ref()
+            );
 
             handler
                 .handle(&event)
@@ -139,7 +148,11 @@ mod tests {
             }
         });
 
-        processor.add_handler("foo", handler, BroadcastStream::new(rx).map_err(Report::from));
+        processor.add_handler(
+            "foo",
+            handler,
+            BroadcastStream::new(rx).map_err(Report::from),
+        );
         assert!(processor.run().await.is_ok());
     }
 
@@ -159,7 +172,11 @@ mod tests {
             assert!(tx.send(events::Event::BlockEnd((10_u32).into())).is_ok());
         });
 
-        processor.add_handler("foo", handler, BroadcastStream::new(rx).map_err(Report::from));
+        processor.add_handler(
+            "foo",
+            handler,
+            BroadcastStream::new(rx).map_err(Report::from),
+        );
         assert!(processor.run().await.is_err());
     }
 
@@ -190,9 +207,11 @@ mod tests {
             }
         });
 
-        processor
-            .add_handler("foo", handler, stream)
-            .add_handler("foo", another_handler, another_stream);
+        processor.add_handler("foo", handler, stream).add_handler(
+            "foo",
+            another_handler,
+            another_stream,
+        );
         assert!(processor.run().await.is_ok());
     }
 
