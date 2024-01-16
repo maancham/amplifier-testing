@@ -91,7 +91,7 @@ impl EcdsaClient for MultisigClient {
             party_uid: self.party_uid.to_string(),
             pub_key: pub_key.to_bytes(),
         };
-        info!("sending sign request");
+        info!("sending sign request {:?}", request);
 
         time::timeout(Duration::from_millis(3000), self.client.sign(request))
             .await
