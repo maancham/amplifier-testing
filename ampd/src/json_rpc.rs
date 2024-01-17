@@ -10,6 +10,8 @@ use serde::{de::DeserializeOwned, Serialize};
 use crate::url::Url;
 use tokio::time;
 
+use tracing::info;
+
 type Result<T> = error_stack::Result<T, ProviderError>;
 
 pub struct Client<P>
@@ -37,6 +39,10 @@ where
             self.provider.request(method, params),
         )
         .await
+        .map_err(|err| {
+            info!("eth json RPC timed out");
+            err
+        })
         .expect("eth json RPC timed out")
         .map_err(Into::into)
         .map_err(Report::from)
