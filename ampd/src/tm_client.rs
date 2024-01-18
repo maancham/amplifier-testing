@@ -6,6 +6,7 @@ use mockall::automock;
 use tendermint::block::Height;
 use tendermint_rpc::{Client, HttpClient};
 use tokio::time;
+use tracing::info;
 
 pub type BlockResultsResponse = tendermint_rpc::endpoint::block_results::Response;
 pub type BlockResponse = tendermint_rpc::endpoint::block::Response;
@@ -23,6 +24,10 @@ impl TmClient for HttpClient {
     async fn latest_block(&self) -> Result<BlockResponse, Error> {
         time::timeout(Duration::from_millis(2000), Client::latest_block(self))
             .await
+            .map_err(|err| {
+                info!("latest_block timed out");
+                err
+            })
             .expect("latest_block timed out")
             .map_err(Report::from)
     }
@@ -33,6 +38,10 @@ impl TmClient for HttpClient {
             Client::block_results(self, height),
         )
         .await
+        .map_err(|err| {
+            info!("block results timed out");
+            err
+        })
         .expect("block_results timed out")
         .map_err(Report::from)
     }

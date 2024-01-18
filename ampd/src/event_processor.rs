@@ -1,12 +1,13 @@
 use core::future::Future;
 use core::pin::Pin;
-use std::vec;
+use std::{time::Duration, vec};
 
 use async_trait::async_trait;
 use error_stack::{Context, Result, ResultExt};
 use events::Event;
 use futures::{future::try_join_all, StreamExt};
 use thiserror::Error;
+use tokio::time;
 use tokio_stream::Stream;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -61,9 +62,13 @@ where
                 label.as_ref()
             );
 
-            handler
-                .handle(&event)
+            time::timeout(Duration::from_millis(20000), handler.handle(&event))
                 .await
+                .map_err(|err| {
+                    info!("handler timed out");
+                    err
+                })
+                .expect("handler timed out")
                 .change_context(EventProcessorError::EventHandlerError)?;
             info!("handled event. label {:?}", label.as_ref());
 
