@@ -10,6 +10,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use crate::url::Url;
 use tokio::time;
 
+use axelar_wasm_std::utils::InspectorResult;
 use tracing::info;
 
 type Result<T> = error_stack::Result<T, ProviderError>;
@@ -34,11 +35,13 @@ where
         T: Debug + Serialize + Send + Sync,
         R: DeserializeOwned + Send,
     {
+        info!("sending rpc client request");
         time::timeout(
             Duration::from_millis(2000),
             self.provider.request(method, params),
         )
         .await
+        .tap(|res| info!("got rpc client response"))
         .map_err(|err| {
             info!("eth json RPC timed out");
             err
