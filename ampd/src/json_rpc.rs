@@ -1,10 +1,7 @@
 use std::{fmt::Debug, time::Duration};
 
 use error_stack::Report;
-use ethers::providers::{
-    Http, HttpRateLimitRetryPolicy, JsonRpcClient, ProviderError, RetryClient, RetryClientBuilder,
-    RpcError,
-};
+use ethers::providers::{Http, JsonRpcClient, ProviderError};
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::url::Url;
@@ -41,7 +38,7 @@ where
             self.provider.request(method, params),
         )
         .await
-        .tap(|res| info!("got rpc client response"))
+        .tap(|_| info!("got rpc client response"))
         .map_err(|err| {
             info!("eth json RPC timed out");
             err

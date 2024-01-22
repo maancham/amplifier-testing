@@ -9,6 +9,7 @@ use thiserror::Error;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::oneshot;
 use tokio::task::JoinSet;
+use tokio::{select, time};
 use tokio_stream::Stream;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -340,14 +341,7 @@ where
             Ok(())
         });
 
-        let execution_result = match (set.join_next().await, token.is_cancelled()) {
-            (Some(result), false) => {
-                token.cancel();
-                result.unwrap_or_else(|err| Err(err).change_context(Error::Task))
-            }
-            (Some(_), true) => Ok(()),
-            (None, _) => panic!("all tasks exited unexpectedly"),
-        };
+        let execution_result = Self::monitor_set(&token, &mut set).await;
 
         while (set.join_next().await).is_some() {}
         // assert: all tasks have exited, it is safe to receive the state
@@ -356,6 +350,32 @@ where
             .expect("the state sender should have been able to send the state");
 
         (state, execution_result)
+    }
+
+    async fn monitor_set(
+        token: &CancellationToken,
+        set: &mut JoinSet<Result<(), Error>>,
+    ) -> Result<(), Error> {
+        let mut interval = time::interval(5 * time::Duration::from_secs(5));
+        loop {
+            let mut execution_result = None;
+            select! {
+                result = set.join_next() =>  match (result, token.is_cancelled()) {
+                (Some(result), false) => {
+                    token.cancel();
+                    execution_result = Some(result.unwrap_or_else(|err| Err(err).change_context(Error::Task)))
+                }
+                (Some(_), true) => execution_result = Some(Ok(())),
+                (None, _) => panic!("all tasks exited unexpectedly"),
+            },
+                _ = interval.tick() =>
+                    info!("currently {} tasks running", set.len())
+            };
+
+            if execution_result.is_some() {
+                return execution_result.unwrap();
+            }
+        }
     }
 }
 
