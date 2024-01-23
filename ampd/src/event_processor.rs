@@ -2,15 +2,16 @@ use core::future::Future;
 use core::pin::Pin;
 use std::{time::Duration, vec};
 
+use crate::Error;
 use async_trait::async_trait;
-use error_stack::{Context, Result, ResultExt};
+use error_stack::{bail, Context, Result, ResultExt};
 use events::Event;
-use futures::{future::try_join_all, StreamExt};
-use thiserror::Error;
-use tokio::time;
+use futures::StreamExt;
+use tokio::task::JoinSet;
+use tokio::{select, time};
 use tokio_stream::Stream;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{error, info};
 
 use crate::handlers::chain;
 
@@ -37,6 +38,8 @@ pub enum EventProcessorError {
     EventHandlerError,
     #[error("event stream error")]
     EventStreamError,
+    #[error("handler failed unexpectedly")]
+    HandlerFailed,
 }
 
 fn consume_events<H, S, E, L>(
@@ -54,7 +57,11 @@ where
     let task = async move {
         let mut event_stream = Box::pin(event_stream);
         while let Some(res) = event_stream.next().await {
-            info!("got event. label {:?} res is_ok() {:?}", label.as_ref(), res.is_ok());
+            info!(
+                "got event. label {:?} res is_ok() {:?}",
+                label.as_ref(),
+                res.is_ok()
+            );
             let event = res.change_context(EventProcessorError::EventStreamError)?;
             info!(
                 "handling event. event {:?}, label {:?}",
@@ -111,14 +118,40 @@ impl EventProcessor {
     }
 
     pub async fn run(self) -> Result<(), EventProcessorError> {
-        let handles = self.tasks.into_iter().map(tokio::spawn);
-
-        try_join_all(handles)
-            .await
-            .change_context(EventProcessorError::EventHandlerError)?
+        let mut set = JoinSet::new();
+        let _abort_handles = self
+            .tasks
             .into_iter()
-            .find(Result::is_err)
-            .unwrap_or(Ok(()))
+            .map(|task| set.spawn(task))
+            .collect::<Vec<_>>();
+
+        Self::monitor_set(&mut set).await
+    }
+
+    async fn monitor_set(
+        set: &mut JoinSet<Result<(), EventProcessorError>>,
+    ) -> Result<(), EventProcessorError> {
+        let mut interval = time::interval(5 * time::Duration::from_secs(5));
+        loop {
+            select! {
+                result = set.join_next() =>  match result {
+                Some(Ok(res)) => {
+                        match res{
+                        Ok(_) => info!("event processor task completed successfully"),
+                            Err(_) => error!("event processor task completed with error")
+                        }
+                        return res
+                }
+                Some(Err(err)) =>{
+                        error!("event processor task failed: {:?}", err);
+                        bail!(EventProcessorError::HandlerFailed)
+                    },
+                None => panic!("all tasks exited unexpectedly"),
+            },
+                _ = interval.tick() =>
+                    info!("currently {} event processor tasks running", set.len())
+            }
+        }
     }
 }
 

@@ -369,7 +369,7 @@ where
                 (None, _) => panic!("all tasks exited unexpectedly"),
             },
                 _ = interval.tick() =>
-                    info!("currently {} tasks running", set.len())
+                    info!("currently {} main tasks running", set.len())
             };
 
             if execution_result.is_some() {
