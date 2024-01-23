@@ -54,7 +54,7 @@ where
     let task = async move {
         let mut event_stream = Box::pin(event_stream);
         while let Some(res) = event_stream.next().await {
-            info!("got event. label {:?}", label.as_ref());
+            info!("got event. label {:?} res is_ok() {:?}", label.as_ref(), res.is_ok());
             let event = res.change_context(EventProcessorError::EventStreamError)?;
             info!(
                 "handling event. event {:?}, label {:?}",

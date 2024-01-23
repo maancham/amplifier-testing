@@ -38,7 +38,7 @@ where
             self.provider.request(method, params),
         )
         .await
-        .tap(|_| info!("got rpc client response"))
+        .tap(|res| info!("got rpc client response, res is_ok() {:?}", res.is_ok()))
         .map_err(|err| {
             info!("eth json RPC timed out");
             err
