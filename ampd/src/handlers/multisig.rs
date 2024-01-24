@@ -128,6 +128,7 @@ where
 
     async fn handle(&self, event: &events::Event) -> error_stack::Result<(), Error> {
         info!("handler {:?}", event);
+        let start = std::time::SystemTime::now();
         let SigningStartedEvent {
             contract_address,
             session_id,
@@ -162,6 +163,9 @@ where
                 info!(signature = encode(&signature), "ready to submit signature");
 
                 self.broadcast_signature(session_id, signature).await?;
+                let end = std::time::SystemTime::now();
+                let duration = end.duration_since(start).unwrap().as_millis();
+                info!("signing handler execution took {} milliseconds", duration);
 
                 Ok(())
             }

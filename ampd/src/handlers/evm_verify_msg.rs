@@ -154,6 +154,7 @@ where
 
     async fn handle(&self, event: &events::Event) -> Result<()> {
         info!("handler handling event {:?}", event);
+        let start = std::time::SystemTime::now();
         let PollStartedEvent {
             contract_address,
             poll_id,
@@ -238,7 +239,11 @@ where
             votes
         });
 
-        self.broadcast_votes(poll_id, votes).await
+        let res = self.broadcast_votes(poll_id, votes).await;
+        let end = std::time::SystemTime::now();
+        let duration = end.duration_since(start).unwrap().as_millis();
+        info!("voting handler execution took {} milliseconds", duration);
+        res
     }
 }
 

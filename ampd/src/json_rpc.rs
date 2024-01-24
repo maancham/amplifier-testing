@@ -30,7 +30,7 @@ where
     pub async fn request<T, R>(&self, method: &str, params: T) -> Result<R>
     where
         T: Debug + Serialize + Send + Sync,
-        R: DeserializeOwned + Send,
+        R: Debug + DeserializeOwned + Send,
     {
         info!("sending rpc client request");
         time::timeout(
@@ -38,7 +38,7 @@ where
             self.provider.request(method, params),
         )
         .await
-        .tap(|res| info!("got rpc client response, res is_ok() {:?}", res.is_ok()))
+        .tap(|res| info!("got rpc client response, res {:?}", res))
         .map_err(|err| {
             info!("eth json RPC timed out");
             err
