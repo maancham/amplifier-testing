@@ -123,6 +123,7 @@ where
                   info!("estimated gas");
 
                   if fee.gas_limit + queue.gas_cost() >= self.batch_gas_limit {
+                    info!("over batch gas limit");
                     interval.reset();
                     broadcast_all(&mut queue, &mut broadcaster).await?;
                   }

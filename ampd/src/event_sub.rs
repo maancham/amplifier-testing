@@ -126,9 +126,23 @@ impl<T: TmClient + Sync> EventSub<T> {
             )
             .chain(iter::once(Event::BlockEnd(height)));
 
+        let mut count = 0;
         for event in events {
+            info!(
+                "sending event {:?} tx len {:?} block {:?}",
+                event,
+                self.tx.len(),
+                height
+            );
             self.tx.send(event).change_context(EventSubError::Publish)?;
+            count = count + 1;
         }
+        info!(
+            "sent {:?} events for block {:?} tx len {:?}",
+            count,
+            height,
+            self.tx.len()
+        );
 
         Ok(())
     }

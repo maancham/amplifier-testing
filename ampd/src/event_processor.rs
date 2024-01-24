@@ -58,9 +58,10 @@ where
         let mut event_stream = Box::pin(event_stream);
         while let Some(res) = event_stream.next().await {
             info!(
-                "got event. label {:?} res is_ok() {:?}",
+                "got event. label {:?} res is_ok() {:?} event stream size hint {:?}",
                 label.as_ref(),
-                res.is_ok()
+                res.is_ok(),
+                event_stream.size_hint()
             );
             let event = res.change_context(EventProcessorError::EventStreamError)?;
             info!(
