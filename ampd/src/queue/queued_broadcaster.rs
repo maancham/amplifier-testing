@@ -57,6 +57,10 @@ impl BroadcasterClient for QueuedBroadcasterClient {
     where
         T: Msg + Send + Sync + 'static,
     {
+        info!(
+            "sending msg to broadcast. msgs in channel {:?}",
+            self.sender.max_capacity() - self.sender.capacity()
+        );
         self.sender
             .send(
                 tx.into_any()
