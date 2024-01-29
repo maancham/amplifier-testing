@@ -122,9 +122,8 @@ where
               msg = rx.recv() => match msg {
                 None => break,
                 Some(msg) => {
-                  info!("estimating gas");
                   let fee = broadcaster.estimate_fee(vec![msg.clone()]).await.change_context(Error::EstimateFee)?;
-                  info!("estimated gas");
+                  info!("estimated gas. gas limit = {:?}", fee.gas_limit);
 
                   if fee.gas_limit + queue.gas_cost() >= self.batch_gas_limit {
                     info!("over batch gas limit");
@@ -142,7 +141,10 @@ where
                   );
                 }
               },
-              _ = interval.tick() => broadcast_all(&mut queue, &mut broadcaster).await?,
+              _ = interval.tick() => {
+                broadcast_all(&mut queue, &mut broadcaster).await?;
+                interval.reset();
+              }
               _ = self.broadcast_rx.recv() => {
                 interval.reset();
                 broadcast_all(&mut queue, &mut broadcaster).await?;

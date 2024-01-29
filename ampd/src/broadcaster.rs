@@ -103,6 +103,7 @@ where
     T: clients::BroadcastClient + Send + Sync,
 {
     async fn broadcast(&mut self, msgs: Vec<cosmrs::Any>) -> Result<TxResponse, Error> {
+        info!("broadcasting transaction. msgs {:?}", msgs);
         let tx = TxBuilder::default()
             .msgs(msgs.clone())
             .fee(self.estimate_fee(msgs).await?)
