@@ -148,26 +148,39 @@ impl<T: TmClient + Sync> EventSub<T> {
     }
 
     async fn events(&self, block_height: block::Height) -> Result<Vec<abci::Event>, EventSubError> {
-        let block_results = self
-            .client
-            .block_results(block_height)
-            .change_context(EventSubError::EventQuery {
-                block: block_height,
-            })
-            .await?;
+        let mut tries = 0;
+        loop {
+            let block_results = self
+                .client
+                .block_results(block_height)
+                .change_context(EventSubError::EventQuery {
+                    block: block_height,
+                })
+                .await;
+            if block_results.is_err() && tries < 5 {
+                tries = tries + 1;
+                info!(
+                    "couldn't get block results. tried {} times. Sleeping and trying again",
+                    tries
+                );
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
+            }
+            let block_results = block_results?;
 
-        let begin_block_events = block_results.begin_block_events.into_iter().flatten();
-        let tx_events = block_results
-            .txs_results
-            .into_iter()
-            .flatten()
-            .flat_map(|tx| tx.events);
-        let end_block_events = block_results.end_block_events.into_iter().flatten();
+            let begin_block_events = block_results.begin_block_events.into_iter().flatten();
+            let tx_events = block_results
+                .txs_results
+                .into_iter()
+                .flatten()
+                .flat_map(|tx| tx.events);
+            let end_block_events = block_results.end_block_events.into_iter().flatten();
 
-        Ok(begin_block_events
-            .chain(tx_events)
-            .chain(end_block_events)
-            .collect())
+            return Ok(begin_block_events
+                .chain(tx_events)
+                .chain(end_block_events)
+                .collect());
+        }
     }
 }
 
