@@ -13,7 +13,7 @@ pub struct InstantiateMsg {
     // the governance address is allowed to modify the authorized caller list for this contract
     pub governance_address: String,
     pub rewards_address: String,
-    pub grace_period: u64, // in blocks after session has been completed
+    pub block_expiry: u64,
 }
 
 #[cw_serde]

@@ -45,7 +45,7 @@ pub enum Error {
     #[error("failed to confirm tx inclusion in block")]
     TxConfirmation,
     #[error("failed to execute tx")]
-    ExecutionError { response: TxResponse },
+    Execution { response: TxResponse },
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
@@ -251,7 +251,7 @@ fn evaluate_response(response: Result<GetTxResponse, Status>) -> ConfirmationRes
             ..
         }) => match response {
             TxResponse { code: 0, .. } => ConfirmationResult::Success,
-            _ => ConfirmationResult::Critical(Error::ExecutionError { response }),
+            _ => ConfirmationResult::Critical(Error::Execution { response }),
         },
     }
 }
@@ -521,7 +521,7 @@ mod tests {
                 .await
                 .unwrap_err()
                 .current_context(),
-            Error::ExecutionError {
+            Error::Execution {
                 response: TxResponse { code: 32, .. }
             }
         ));

@@ -1,21 +1,18 @@
-use core::future::Future;
-use core::pin::Pin;
-use std::{time::Duration, vec};
+use std::pin::Pin;
+use std::time::Duration;
 
-use crate::Error;
 use async_trait::async_trait;
-use error_stack::{bail, Context, Result, ResultExt};
+use error_stack::{Context, Result, ResultExt};
 use events::Event;
 use futures::StreamExt;
-use tokio::task::JoinSet;
-use tokio::{select, time};
+use thiserror::Error;
+use tokio::time::timeout;
 use tokio_stream::Stream;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+
+use crate::asyncutil::task::TaskError;
 
 use crate::handlers::chain;
-
-type Task = Box<dyn Future<Output = Result<(), EventProcessorError>> + Send>;
 
 #[async_trait]
 pub trait EventHandler {
@@ -33,231 +30,233 @@ pub trait EventHandler {
 }
 
 #[derive(Error, Debug)]
-pub enum EventProcessorError {
-    #[error("event handler failed handling event")]
-    EventHandlerError,
-    #[error("event stream error")]
-    EventStreamError,
-    #[error("handler failed unexpectedly")]
-    HandlerFailed,
+pub enum Error {
+    #[error("handler failed to process event")]
+    Handler,
+    #[error("could not consume events from stream")]
+    EventStream,
+    #[error("handler stopped prematurely")]
+    Tasks(#[from] TaskError),
 }
 
-fn consume_events<H, S, E, L>(
-    event_stream: S,
-    label: L,
+/// Let the `handler` consume events from the `event_stream`. The token is checked for cancellation
+/// at the end of each consumed block or when the `event_stream` times out. If the token is cancelled or the
+/// `event_stream` is closed, the function returns
+pub async fn consume_events<H, S, E>(
     handler: H,
+    event_stream: S,
+    stream_timeout: Duration,
     token: CancellationToken,
-) -> Task
+) -> Result<(), Error>
 where
-    H: EventHandler + Send + Sync + 'static,
-    S: Stream<Item = Result<Event, E>> + Send + 'static,
+    H: EventHandler,
+    S: Stream<Item = Result<Event, E>>,
     E: Context,
-    L: AsRef<str> + Send + 'static,
 {
-    let task = async move {
-        let mut event_stream = Box::pin(event_stream);
-        while let Some(res) = event_stream.next().await {
-            info!(
-                "got event. label {:?} res is_ok() {:?} event stream size hint {:?}",
-                label.as_ref(),
-                res.is_ok(),
-                event_stream.size_hint()
-            );
-            let event = res.change_context(EventProcessorError::EventStreamError)?;
-            info!(
-                "handling event. event {:?}, label {:?}",
-                event,
-                label.as_ref()
-            );
+    let mut event_stream = Box::pin(event_stream);
+    loop {
+        let stream_status = retrieve_next_event(&mut event_stream, stream_timeout)
+            .await
+            .change_context(Error::EventStream)?;
 
-            time::timeout(Duration::from_millis(20000), handler.handle(&event))
-                .await
-                .map_err(|err| {
-                    info!("handler timed out");
-                    err
-                })
-                .expect("handler timed out")
-                .change_context(EventProcessorError::EventHandlerError)?;
-            info!("handled event. label {:?}", label.as_ref());
-
-            if matches!(event, Event::BlockEnd(_)) && token.is_cancelled() {
-                info!("breaking in consume events. label {:?}", label.as_ref());
-                break;
-            }
-            info!("waiting for next event. label {:?}", label.as_ref());
+        if let StreamStatus::Active(event) = &stream_status {
+            handler.handle(event).await.change_context(Error::Handler)?;
         }
 
-        Ok(())
+        if should_task_stop(stream_status, &token) {
+            return Ok(());
+        }
+    }
+}
+
+async fn retrieve_next_event<S, E>(
+    event_stream: &mut Pin<Box<S>>,
+    stream_timeout: Duration,
+) -> Result<StreamStatus, E>
+where
+    S: Stream<Item = Result<Event, E>>,
+    E: Context,
+{
+    let status = match timeout(stream_timeout, event_stream.next()).await {
+        Err(_) => StreamStatus::TimedOut,
+        Ok(None) => StreamStatus::Closed,
+        Ok(Some(event)) => StreamStatus::Active(event?),
     };
-
-    Box::new(task)
+    Ok(status)
 }
 
-pub struct EventProcessor {
-    tasks: Vec<Pin<Task>>,
-    token: CancellationToken,
+fn should_task_stop(stream_status: StreamStatus, token: &CancellationToken) -> bool {
+    match stream_status {
+        StreamStatus::Active(Event::BlockEnd(_)) | StreamStatus::TimedOut
+            if token.is_cancelled() =>
+        {
+            true
+        }
+        StreamStatus::Closed => true,
+        _ => false,
+    }
 }
 
-impl EventProcessor {
-    pub fn new(token: CancellationToken) -> Self {
-        EventProcessor {
-            tasks: vec![],
-            token,
-        }
-    }
-
-    pub fn add_handler<H, S, E, L>(&mut self, label: L, handler: H, event_stream: S) -> &mut Self
-    where
-        H: EventHandler + Send + Sync + 'static,
-        S: Stream<Item = Result<Event, E>> + Send + 'static,
-        E: Context,
-        L: AsRef<str> + Send + 'static,
-    {
-        self.tasks
-            .push(consume_events(event_stream, label, handler, self.token.child_token()).into());
-        self
-    }
-
-    pub async fn run(self) -> Result<(), EventProcessorError> {
-        let mut set = JoinSet::new();
-        let _abort_handles = self
-            .tasks
-            .into_iter()
-            .map(|task| set.spawn(task))
-            .collect::<Vec<_>>();
-
-        Self::monitor_set(&mut set).await
-    }
-
-    async fn monitor_set(
-        set: &mut JoinSet<Result<(), EventProcessorError>>,
-    ) -> Result<(), EventProcessorError> {
-        let mut interval = time::interval(5 * time::Duration::from_secs(5));
-        loop {
-            select! {
-                result = set.join_next() =>  match result {
-                Some(Ok(res)) => {
-                        match res{
-                        Ok(_) => info!("event processor task completed successfully"),
-                            Err(_) => error!("event processor task completed with error")
-                        }
-                        return res
-                }
-                Some(Err(err)) =>{
-                        error!("event processor task failed: {:?}", err);
-                        bail!(EventProcessorError::HandlerFailed)
-                    },
-                None => panic!("all tasks exited unexpectedly"),
-            },
-                _ = interval.tick() =>
-                    info!("currently {} event processor tasks running", set.len())
-            }
-        }
-    }
+enum StreamStatus {
+    Active(Event),
+    Closed,
+    TimedOut,
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::event_processor::{EventHandler, EventProcessor};
+    use crate::event_processor::{consume_events, Error, EventHandler};
     use async_trait::async_trait;
-    use error_stack::{Report, Result};
-    use futures::TryStreamExt;
+    use error_stack::{report, Result};
+    use futures::stream;
     use mockall::mock;
-    use thiserror::Error;
-    use tokio::{self, sync::broadcast};
-    use tokio_stream::wrappers::BroadcastStream;
+    use std::time::Duration;
+
+    use crate::event_processor;
+    use events::Event;
+    use tokio::time::timeout;
     use tokio_util::sync::CancellationToken;
 
     #[tokio::test]
-    async fn should_handle_events() {
-        let event_count = 10;
-        let (tx, rx) = broadcast::channel::<events::Event>(event_count);
-        let token = CancellationToken::new();
-        let mut processor = EventProcessor::new(token.child_token());
+    async fn stop_when_stream_closes() {
+        let events: Vec<Result<Event, event_processor::Error>> = vec![
+            Ok(Event::BlockEnd(0_u32.into())),
+            Ok(Event::BlockEnd(1_u32.into())),
+            Ok(Event::BlockEnd(3_u32.into())),
+        ];
 
         let mut handler = MockEventHandler::new();
         handler
             .expect_handle()
-            .returning(|_| Ok(()))
-            .times(event_count);
+            .times(events.len())
+            .returning(|_| Ok(()));
 
-        tokio::spawn(async move {
-            for i in 0..event_count {
-                assert!(tx.send(events::Event::BlockEnd((i as u32).into())).is_ok());
-            }
-        });
+        let result_with_timeout = timeout(
+            Duration::from_secs(1),
+            consume_events(
+                handler,
+                stream::iter(events),
+                Duration::from_secs(1000),
+                CancellationToken::new(),
+            ),
+        )
+        .await;
 
-        processor.add_handler(
-            "foo",
-            handler,
-            BroadcastStream::new(rx).map_err(Report::from),
-        );
-        assert!(processor.run().await.is_ok());
+        assert!(result_with_timeout.is_ok());
+        assert!(result_with_timeout.unwrap().is_ok());
     }
 
     #[tokio::test]
-    async fn should_return_error_if_handler_fails() {
-        let (tx, rx) = broadcast::channel::<events::Event>(10);
-        let token = CancellationToken::new();
-        let mut processor = EventProcessor::new(token.child_token());
+    async fn return_error_when_stream_fails() {
+        let events: Vec<Result<Event, event_processor::Error>> = vec![
+            Ok(Event::BlockEnd(0_u32.into())),
+            Err(report!(Error::EventStream)),
+        ];
 
         let mut handler = MockEventHandler::new();
-        handler
-            .expect_handle()
-            .returning(|_| Err(EventHandlerError::Unknown.into()))
-            .once();
+        handler.expect_handle().times(1).returning(|_| Ok(()));
 
-        tokio::spawn(async move {
-            assert!(tx.send(events::Event::BlockEnd((10_u32).into())).is_ok());
-        });
+        let result_with_timeout = timeout(
+            Duration::from_secs(1),
+            consume_events(
+                handler,
+                stream::iter(events),
+                Duration::from_secs(1000),
+                CancellationToken::new(),
+            ),
+        )
+        .await;
 
-        processor.add_handler(
-            "foo",
-            handler,
-            BroadcastStream::new(rx).map_err(Report::from),
-        );
-        assert!(processor.run().await.is_err());
+        assert!(result_with_timeout.is_ok());
+        assert!(result_with_timeout.unwrap().is_err());
     }
 
     #[tokio::test]
-    async fn should_support_multiple_types_of_handlers() {
-        let event_count = 10;
-        let (tx, rx) = broadcast::channel::<events::Event>(event_count);
-        let token = CancellationToken::new();
-        let mut processor = EventProcessor::new(token.child_token());
-        let stream = BroadcastStream::new(rx).map_err(Report::from);
-        let another_stream = BroadcastStream::new(tx.subscribe()).map_err(Report::from);
+    async fn return_error_when_handler_fails() {
+        let events: Vec<Result<Event, event_processor::Error>> = vec![
+            Ok(Event::BlockEnd(0_u32.into())),
+            Ok(Event::BlockEnd(1_u32.into())),
+        ];
 
         let mut handler = MockEventHandler::new();
         handler
             .expect_handle()
-            .returning(|_| Ok(()))
-            .times(event_count);
+            .times(1)
+            .returning(|_| Err(report!(EventHandlerError::Failed)));
 
-        let mut another_handler = MockAnotherEventHandler::new();
-        another_handler
-            .expect_handle()
-            .returning(|_| Ok(()))
-            .times(event_count);
+        let result_with_timeout = timeout(
+            Duration::from_secs(1),
+            consume_events(
+                handler,
+                stream::iter(events),
+                Duration::from_secs(1000),
+                CancellationToken::new(),
+            ),
+        )
+        .await;
 
-        tokio::spawn(async move {
-            for i in 0..event_count {
-                assert!(tx.send(events::Event::BlockEnd((i as u32).into())).is_ok());
-            }
-        });
+        assert!(result_with_timeout.is_ok());
+        assert!(result_with_timeout.unwrap().is_err());
+    }
 
-        processor.add_handler("foo", handler, stream).add_handler(
-            "foo",
-            another_handler,
-            another_stream,
-        );
-        assert!(processor.run().await.is_ok());
+    #[tokio::test]
+    async fn react_to_cancellation_at_block_end() {
+        let events: Vec<Result<Event, event_processor::Error>> = vec![
+            Ok(Event::BlockBegin(0_u32.into())),
+            Ok(Event::BlockBegin(1_u32.into())),
+            Ok(Event::BlockBegin(2_u32.into())),
+            Ok(Event::BlockEnd(3_u32.into())),
+            Ok(Event::BlockBegin(4_u32.into())),
+        ];
+
+        let mut handler = MockEventHandler::new();
+        handler.expect_handle().times(4).returning(|_| Ok(()));
+
+        let token = CancellationToken::new();
+        token.cancel();
+
+        let result_with_timeout = timeout(
+            Duration::from_secs(1),
+            consume_events(
+                handler,
+                stream::iter(events),
+                Duration::from_secs(1000),
+                token,
+            ),
+        )
+        .await;
+
+        assert!(result_with_timeout.is_ok());
+        assert!(result_with_timeout.unwrap().is_ok());
+    }
+
+    #[tokio::test]
+    async fn react_to_cancellation_on_timeout() {
+        let mut handler = MockEventHandler::new();
+        handler.expect_handle().times(0).returning(|_| Ok(()));
+
+        let token = CancellationToken::new();
+        token.cancel();
+
+        let result_with_timeout = timeout(
+            Duration::from_secs(1),
+            consume_events(
+                handler,
+                stream::pending::<Result<Event, Error>>(), // never returns any items so it can time out
+                Duration::from_secs(0),
+                token,
+            ),
+        )
+        .await;
+
+        assert!(result_with_timeout.is_ok());
+        assert!(result_with_timeout.unwrap().is_ok());
     }
 
     #[derive(Error, Debug)]
     pub enum EventHandlerError {
-        #[error("unknown")]
-        Unknown,
+        #[error("failed")]
+        Failed,
     }
 
     mock! {
@@ -267,21 +266,7 @@ mod tests {
             impl EventHandler for EventHandler {
                 type Err = EventHandlerError;
 
-                async fn handle(&self, event: &events::Event) -> Result<(), EventHandlerError>;
-            }
-    }
-
-    #[derive(Error, Debug)]
-    pub enum AnotherEventHandlerError {}
-
-    mock! {
-            AnotherEventHandler{}
-
-            #[async_trait]
-            impl EventHandler for AnotherEventHandler {
-                type Err = AnotherEventHandlerError;
-
-                async fn handle(&self, event: &events::Event) -> Result<(), AnotherEventHandlerError>;
+                async fn handle(&self, event: &Event) -> Result<(), EventHandlerError>;
             }
     }
 }

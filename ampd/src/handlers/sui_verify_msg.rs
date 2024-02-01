@@ -128,14 +128,12 @@ where
             return Ok(());
         }
 
-        info!("handling event. checking latest block height");
         let latest_block_height = *self.latest_block_height.borrow();
         if latest_block_height >= expires_at {
             info!(poll_id = poll_id.to_string(), "skipping expired poll");
             return Ok(());
         }
 
-        info!("handling event. checks passed, making rpc calls");
         // Does not assume voting verifier emits unique tx ids.
         // RPC will throw an error if the input contains any duplicate, deduplicate tx ids to avoid unnecessary failures.
         let deduplicated_tx_ids: HashSet<_> = messages.iter().map(|msg| msg.tx_id).collect();
