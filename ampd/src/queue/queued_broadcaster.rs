@@ -168,6 +168,7 @@ async fn broadcast_all<T>(queue: &mut MsgQueue, broadcaster: &mut T) -> Result
 where
     T: Broadcaster,
 {
+    info!("broadcasting queued messages");
     let msgs = queue.pop_all();
 
     match msgs.len() {
