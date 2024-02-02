@@ -9,6 +9,7 @@ use thiserror::Error;
 use tokio::time::timeout;
 use tokio_stream::Stream;
 use tokio_util::sync::CancellationToken;
+use tracing::warn;
 
 use crate::asyncutil::task::TaskError;
 
@@ -60,7 +61,22 @@ where
             .change_context(Error::EventStream)?;
 
         if let StreamStatus::Active(event) = &stream_status {
-            handler.handle(event).await.change_context(Error::Handler)?;
+            let mut tries = 1;
+            loop {
+                let result = handler.handle(event).await.change_context(Error::Handler);
+                if result.is_ok() {
+                    break;
+                } else if tries < 2 {
+                    warn!(
+                        "handler failed. sleeping and trying again. result {:?}",
+                        result
+                    );
+                    tries += 1;
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                } else {
+                    warn!("handler failed. skipping. result {:?}", result);
+                }
+            }
         }
 
         if should_task_stop(stream_status, &token) {
