@@ -75,6 +75,7 @@ where
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 } else {
                     warn!("handler failed. skipping. result {:?}", result);
+                    break;
                 }
             }
         }
