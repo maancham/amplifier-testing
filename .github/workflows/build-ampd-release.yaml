@@ -95,6 +95,7 @@ jobs:
           fi
 
       - name: Test Binary Format
+        working-directory: ./ampdbin
         run: |
           for binary in ./ampd-*; do
             if [[ "$binary" != *.asc ]]; then
