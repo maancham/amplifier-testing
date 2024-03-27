@@ -55,10 +55,11 @@ pub fn execute(
         ExecuteMsg::RegisterChain {
             chain,
             gateway_address,
+            msg_id_format
         } => {
             execute::require_governance(&deps, info)?;
             let gateway_address = deps.api.addr_validate(&gateway_address)?;
-            execute::register_chain(deps, chain, gateway_address)
+            execute::register_chain(deps, chain, gateway_address, msg_id_format)
         }
         ExecuteMsg::UpgradeGateway {
             chain,

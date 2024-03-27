@@ -6,7 +6,7 @@ use axelar_wasm_std::{
     voting::{PollId, PollState, Vote},
     MajorityThreshold, VerificationStatus,
 };
-use connection_router_api::{ChainName, CrossChainId, Message};
+use connection_router_api::{ChainName, CrossChainId, Message, MessageIdFormat};
 
 #[cw_serde]
 pub struct InstantiateMsg {
@@ -20,6 +20,7 @@ pub struct InstantiateMsg {
     pub confirmation_height: u64,
     pub source_chain: ChainName,
     pub rewards_address: String,
+    pub msg_id_format: MessageIdFormat,
 }
 
 #[cw_serde]

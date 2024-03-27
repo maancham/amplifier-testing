@@ -10,7 +10,7 @@ use axelar_wasm_std::{
     voting::{PollId, WeightedPoll},
     MajorityThreshold,
 };
-use connection_router_api::{ChainName, Message};
+use connection_router_api::{ChainName, Message, MessageIdFormat};
 
 use crate::error::ContractError;
 
@@ -24,6 +24,7 @@ pub struct Config {
     pub confirmation_height: u64,
     pub source_chain: ChainName,
     pub rewards_contract: Addr,
+    pub msg_id_format: MessageIdFormat
 }
 
 #[cw_serde]

@@ -66,6 +66,7 @@ fn register_chain(config: &mut TestConfig, chain: &Chain) {
             &ExecuteMsg::RegisterChain {
                 chain: chain.chain_name.clone(),
                 gateway_address: chain.gateway.to_string().try_into().unwrap(),
+                msg_id_format: connection_router_api::MessageIdFormat::Evm,
             },
         )
         .unwrap();
@@ -223,6 +224,7 @@ fn authorization() {
             &ExecuteMsg::RegisterChain {
                 chain: chain.chain_name.clone(),
                 gateway_address: chain.gateway.to_string().try_into().unwrap(),
+                msg_id_format: connection_router_api::MessageIdFormat::Evm,
             },
         )
         .unwrap_err();
@@ -236,6 +238,7 @@ fn authorization() {
             &ExecuteMsg::RegisterChain {
                 chain: chain.chain_name.clone(),
                 gateway_address: chain.gateway.to_string().try_into().unwrap(),
+                msg_id_format: connection_router_api::MessageIdFormat::Evm,
             },
         )
         .unwrap_err();
@@ -247,6 +250,7 @@ fn authorization() {
         &ExecuteMsg::RegisterChain {
             chain: chain.chain_name.clone(),
             gateway_address: chain.gateway.to_string().try_into().unwrap(),
+            msg_id_format: connection_router_api::MessageIdFormat::Evm,
         },
     );
     assert!(res.is_ok());
@@ -501,6 +505,7 @@ fn chain_already_registered() {
                     .to_string()
                     .try_into()
                     .unwrap(),
+                msg_id_format: connection_router_api::MessageIdFormat::Evm,
             },
         )
         .unwrap_err();
@@ -518,6 +523,7 @@ fn chain_already_registered() {
                     .to_string()
                     .try_into()
                     .unwrap(),
+                msg_id_format: connection_router_api::MessageIdFormat::Evm,
             },
         )
         .unwrap_err();
@@ -552,6 +558,7 @@ fn gateway_already_registered() {
             &ExecuteMsg::RegisterChain {
                 chain: polygon.chain_name.clone(),
                 gateway_address: eth.gateway.to_string().try_into().unwrap(),
+                msg_id_format: connection_router_api::MessageIdFormat::Evm,
             },
         )
         .unwrap_err();

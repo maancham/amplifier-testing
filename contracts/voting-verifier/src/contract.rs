@@ -24,6 +24,7 @@ pub fn instantiate(
         confirmation_height: msg.confirmation_height,
         source_chain: msg.source_chain,
         rewards_contract: deps.api.addr_validate(&msg.rewards_address)?,
+        msg_id_format: msg.msg_id_format
     };
     CONFIG.save(deps.storage, &config)?;
 
@@ -143,6 +144,7 @@ mod test {
             confirmation_height: 100,
             source_chain: source_chain(),
             rewards_contract: Addr::unchecked(REWARDS_ADDRESS),
+            msg_id_format: connection_router_api::MessageIdFormat::Evm
         };
         CONFIG.save(deps.as_mut().storage, &config).unwrap();
 

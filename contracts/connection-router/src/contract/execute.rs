@@ -6,7 +6,7 @@ use itertools::Itertools;
 
 use axelar_wasm_std::flagset::FlagSet;
 use connection_router_api::error::Error;
-use connection_router_api::{ChainEndpoint, ChainName, Gateway, GatewayDirection, Message};
+use connection_router_api::{verify_msg_id, ChainEndpoint, ChainName, Gateway, GatewayDirection, Message, MessageIdFormat};
 
 use crate::events::{
     ChainFrozen, ChainRegistered, ChainUnfrozen, GatewayInfo, GatewayUpgraded, MessageRouted,
@@ -15,7 +15,7 @@ use crate::state::{chain_endpoints, Store, CONFIG};
 
 use super::Contract;
 
-pub fn register_chain(deps: DepsMut, name: ChainName, gateway: Addr) -> Result<Response, Error> {
+pub fn register_chain(deps: DepsMut, name: ChainName, gateway: Addr, msg_id_format: MessageIdFormat) -> Result<Response, Error> {
     if find_chain_for_gateway(&deps, &gateway)?.is_some() {
         return Err(Error::GatewayAlreadyRegistered);
     }
@@ -27,6 +27,7 @@ pub fn register_chain(deps: DepsMut, name: ChainName, gateway: Addr) -> Result<R
                 address: gateway.clone(),
             },
             frozen_status: FlagSet::from(GatewayDirection::None),
+            msg_id_format
         }),
     })?;
     Ok(Response::new().add_event(ChainRegistered { name, gateway }.into()))
@@ -157,6 +158,10 @@ where
             return Err(report!(Error::WrongSourceChain));
         }
 
+        if msgs.iter().any(|msg| verify_msg_id(&msg.cc_id.id, &source_chain.msg_id_format).is_err()) {
+            return Err(report!(Error::InvalidMessageId))
+        }
+
         Ok(msgs)
     }
 
@@ -214,7 +219,7 @@ mod test {
     use axelar_wasm_std::flagset::FlagSet;
     use connection_router_api::error::Error;
     use connection_router_api::{
-        ChainEndpoint, ChainName, CrossChainId, Gateway, GatewayDirection, Message,
+        ChainEndpoint, ChainName, CrossChainId, Gateway, GatewayDirection, Message, MessageIdFormat,
     };
     use cosmwasm_std::testing::mock_dependencies;
     use cosmwasm_std::Storage;
@@ -223,7 +228,7 @@ mod test {
     use crate::state::chain_endpoints;
     use crate::{
         contract::Contract,
-        state::{Config, MockStore, ID_SEPARATOR},
+        state::{Config, MockStore},
     };
 
     use super::{freeze_chain, unfreeze_chain};
@@ -314,6 +319,7 @@ mod test {
                 address: sender.clone(),
             },
             frozen_status: FlagSet::from(GatewayDirection::Incoming),
+            msg_id_format: MessageIdFormat::Evm
         };
         store
             .expect_load_chain_by_gateway()
@@ -351,6 +357,7 @@ mod test {
                 address: sender.clone(),
             },
             frozen_status: FlagSet::from(GatewayDirection::None),
+            msg_id_format: MessageIdFormat::Evm
         };
         store
             .expect_load_chain_by_gateway()
@@ -389,6 +396,7 @@ mod test {
                 address: sender.clone(),
             },
             frozen_status: FlagSet::from(GatewayDirection::None),
+            msg_id_format: MessageIdFormat::Evm
         };
         store
             .expect_load_chain_by_gateway()
@@ -401,6 +409,7 @@ mod test {
                 address: sender.clone(),
             },
             frozen_status: FlagSet::from(GatewayDirection::Bidirectional),
+            msg_id_format: MessageIdFormat::Evm
         };
         store
             .expect_load_chain_by_chain_name()
@@ -439,6 +448,7 @@ mod test {
                 address: sender.clone(),
             },
             frozen_status: FlagSet::from(GatewayDirection::None),
+            msg_id_format: MessageIdFormat::Evm
         };
         store
             .expect_load_chain_by_gateway()
@@ -451,6 +461,7 @@ mod test {
                 address: sender.clone(),
             },
             frozen_status: FlagSet::from(GatewayDirection::None),
+            msg_id_format: MessageIdFormat::Evm
         };
         store
             .expect_load_chain_by_chain_name()
@@ -463,6 +474,7 @@ mod test {
                 address: sender.clone(),
             },
             frozen_status: FlagSet::from(GatewayDirection::None),
+            msg_id_format: MessageIdFormat::Evm
         };
         store
             .expect_load_chain_by_chain_name()
@@ -507,6 +519,7 @@ mod test {
                 address: sender.clone(),
             },
             frozen_status: FlagSet::from(GatewayDirection::None),
+            msg_id_format: MessageIdFormat::Evm
         };
         store
             .expect_load_chain_by_chain_name()
@@ -519,6 +532,7 @@ mod test {
                 address: sender.clone(),
             },
             frozen_status: FlagSet::from(GatewayDirection::None),
+            msg_id_format: MessageIdFormat::Evm
         };
         store
             .expect_load_chain_by_chain_name()
@@ -596,6 +610,7 @@ mod test {
                 address: sender.clone(),
             },
             frozen_status: FlagSet::from(GatewayDirection::None),
+            msg_id_format: MessageIdFormat::Evm
         };
         store
             .expect_load_chain_by_gateway()
@@ -636,6 +651,7 @@ mod test {
                         address: Addr::unchecked("gateway"),
                     },
                     frozen_status: FlagSet::from(GatewayDirection::None),
+                    msg_id_format: MessageIdFormat::Evm
                 },
             )
             .unwrap();
@@ -714,6 +730,7 @@ mod test {
                         address: Addr::unchecked("gateway"),
                     },
                     frozen_status: FlagSet::from(GatewayDirection::None),
+                    msg_id_format: MessageIdFormat::Evm
                 },
             )
             .unwrap();

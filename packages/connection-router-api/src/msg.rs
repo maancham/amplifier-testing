@@ -12,6 +12,7 @@ pub enum ExecuteMsg {
     RegisterChain {
         chain: ChainName,
         gateway_address: Address,
+        msg_id_format: MessageIdFormat
     },
     // Changes the gateway address associated with a particular chain
     UpgradeGateway {

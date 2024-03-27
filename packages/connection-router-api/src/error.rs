@@ -46,4 +46,7 @@ pub enum Error {
 
     #[error("store failed saving/loading data")]
     StoreFailure,
+
+    #[error("message id is invalid")]
+    InvalidMessageID { id: String, expected_format: String}
 }

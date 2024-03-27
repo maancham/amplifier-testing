@@ -40,6 +40,7 @@ impl VotingVerifierContract {
                     confirmation_height: 5,
                     source_chain,
                     rewards_address: rewards_address.to_string(),
+                    msg_id_format: connection_router_api::MessageIdFormat::Evm
                 },
                 &[],
                 "voting_verifier",

@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::{any::type_name, fmt, ops::Deref, str::FromStr};
 
 use axelar_wasm_std::flagset::FlagSet;
@@ -17,6 +18,90 @@ use valuable::Valuable;
 use crate::error::*;
 
 pub const CHAIN_NAME_DELIMITER: char = '_';
+
+#[cw_serde]
+pub enum MessageIdFormat {
+    Evm,
+    Sui,
+}
+
+pub trait MessageId: FromStr + Display {}
+
+pub fn verify_msg_id(message_id: &str, format: &MessageIdFormat) -> Result<(), Error> {
+    match format {
+        MessageIdFormat::Evm => EvmMsgId::from_str(message_id).map(|_| ()),
+        MessageIdFormat::Sui => todo!(),
+    }
+}
+
+pub struct EvmMsgId {
+    pub tx_hash: Hash,
+    pub event_index: u32,
+}
+
+impl EvmMsgId {
+    pub fn tx_hash_as_hex(&self) -> nonempty::String {
+        format!("0x{}", HexBinary::from(self.tx_hash).to_hex())
+            .try_into()
+            .expect("failed to convert tx hash to non-empty string. shouldn't happen")
+    }
+}
+
+impl FromStr for EvmMsgId {
+    type Err = Error;
+    fn from_str(message_id: &str) -> Result<Self, Self::Err> where Self: Sized {
+        // expected format: <tx_id>:<index>
+        let components = message_id.split('-').collect::<Vec<_>>();
+
+        if components.len() != 2 {
+            return Err(Error::InvalidMessageID {
+                id: message_id.to_string(),
+                expected_format: "tx_hash-event_index".to_string(),
+            });
+        }
+
+        let tx_hash = components[0];
+        if !tx_hash.starts_with("0x") || tx_hash.len() != 66 {
+            return Err(Error::InvalidMessageID {
+                id: message_id.to_string(),
+                expected_format: "tx_hash-event_index".to_string(),
+            });
+        }
+
+        let event_index = components[1];
+        if event_index != "0" && event_index.starts_with('0') {
+            return Err(Error::InvalidMessageID {
+                id: message_id.to_string(),
+                expected_format: "tx_hash-event_index".to_string(),
+            });
+        }
+
+        Ok(EvmMsgId {
+            tx_hash: HexBinary::from_hex(&tx_hash[2..])?
+                .as_slice()
+                .try_into()
+                .map_err(|_| Error::InvalidMessageID {
+                    id: message_id.to_string(),
+                    expected_format: "tx_hash-event_index".to_string(),
+                })?,
+            event_index: event_index.parse().map_err(|_| Error::InvalidMessageID {
+                id: message_id.to_string(),
+                expected_format: "tx_hash-event_index".to_string(),
+            })?,
+        })
+    }
+}
+
+impl Display for EvmMsgId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "0x{}-{}",
+            HexBinary::from(self.tx_hash).to_hex(),
+            self.event_index
+        )
+    }
+}
 
 #[cw_serde]
 pub struct Message {
@@ -261,6 +346,7 @@ pub struct ChainEndpoint {
     pub name: ChainName,
     pub gateway: Gateway,
     pub frozen_status: FlagSet<GatewayDirection>,
+    pub msg_id_format: MessageIdFormat,
 }
 
 impl ChainEndpoint {

@@ -15,7 +15,7 @@ use connection_router_api::{ChainName, Message};
 use service_registry::{msg::QueryMsg, state::WeightedWorker};
 
 use crate::events::{
-    PollEnded, PollMetadata, PollStarted, TxEventConfirmation, Voted, WorkerSetConfirmation,
+    make_tx_event_confirmation, PollEnded, PollMetadata, PollStarted, TxEventConfirmation, Voted, WorkerSetConfirmation
 };
 use crate::msg::{EndPollResponse, VerifyMessagesResponse};
 use crate::query::worker_set_status;
@@ -127,7 +127,7 @@ pub fn verify_messages(
 
     let messages = msgs_to_verify
         .into_iter()
-        .map(TryInto::try_into)
+        .map(|msg| make_tx_event_confirmation(msg,&config.msg_id_format))
         .collect::<Result<Vec<TxEventConfirmation>, _>>()?;
 
     Ok(response.add_event(

@@ -16,7 +16,7 @@ pub fn get_chain_info(deps: Deps, chain: ChainName) -> Result<ChainEndpoint, Err
 mod test {
     use axelar_wasm_std::flagset::FlagSet;
     use connection_router_api::error::Error;
-    use connection_router_api::{ChainEndpoint, ChainName, Gateway, GatewayDirection};
+    use connection_router_api::{ChainEndpoint, ChainName, Gateway, GatewayDirection, MessageIdFormat};
     use cosmwasm_std::{testing::mock_dependencies, Addr};
 
     use crate::state::chain_endpoints;
@@ -33,6 +33,7 @@ mod test {
                 address: Addr::unchecked("some gateway"),
             },
             frozen_status: FlagSet::from(GatewayDirection::None),
+            msg_id_format: MessageIdFormat::Evm
         };
 
         assert!(chain_endpoints()

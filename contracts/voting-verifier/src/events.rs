@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::vec::Vec;
 
 use axelar_wasm_std::hash::Hash;
@@ -7,7 +8,7 @@ use cosmwasm_std::{Addr, Attribute, Event, HexBinary};
 use axelar_wasm_std::nonempty;
 use axelar_wasm_std::operators::Operators;
 use axelar_wasm_std::voting::{PollId, Vote};
-use connection_router_api::{Address, ChainName, Message};
+use connection_router_api::{Address, ChainName, EvmMsgId, Message, MessageIdFormat};
 
 pub const TX_HASH_EVENT_INDEX_SEPARATOR: char = '-';
 
@@ -145,22 +146,29 @@ pub struct TxEventConfirmation {
     pub payload_hash: [u8; 32],
 }
 
-impl TryFrom<Message> for TxEventConfirmation {
-    type Error = ContractError;
 
-    fn try_from(other: Message) -> Result<Self, Self::Error> {
-        let (tx_id, event_index) = parse_message_id(&other.cc_id.id)?;
+    pub fn make_tx_event_confirmation(msg: Message, msg_id_format: &MessageIdFormat) -> Result<TxEventConfirmation, ContractError> {
+        let (tx_id, event_index) = match msg_id_format {
+            MessageIdFormat::Evm => {
+
+                let evm_msg_id=
+            EvmMsgId::from_str(&msg.cc_id.id)?;
+            (evm_msg_id.tx_hash_as_hex(), evm_msg_id.event_index)
+            },
+            MessageIdFormat::Sui => {
+                todo!()
+            }
+        };
 
         Ok(TxEventConfirmation {
             tx_id,
             event_index,
-            destination_address: other.destination_address,
-            destination_chain: other.destination_chain,
-            source_address: other.source_address,
-            payload_hash: other.payload_hash,
+            destination_address: msg.destination_address,
+            destination_chain: msg.destination_chain,
+            source_address: msg.source_address,
+            payload_hash: msg.payload_hash,
         })
     }
-}
 
 fn parse_message_id(
     message_id: &nonempty::String,
