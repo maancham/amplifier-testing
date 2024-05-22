@@ -8,7 +8,7 @@ use signature_verifier_api::client::SignatureVerifier;
 use crate::{
     key::{PublicKey, Signature},
     types::{MsgToSign, MultisigState},
-    worker_set::WorkerSet,
+    verifier_set::VerifierSet,
     ContractError,
 };
 
@@ -46,7 +46,7 @@ impl SigningSession {
     pub fn recalculate_session_state(
         &mut self,
         signatures: &HashMap<String, Signature>,
-        worker_set: &WorkerSet,
+        worker_set: &VerifierSet,
         block_height: u64,
     ) {
         let weight = signers_weight(signatures, worker_set);
@@ -118,7 +118,7 @@ fn call_sig_verifier(
     }
 }
 
-fn signers_weight(signatures: &HashMap<String, Signature>, worker_set: &WorkerSet) -> Uint256 {
+fn signers_weight(signatures: &HashMap<String, Signature>, worker_set: &VerifierSet) -> Uint256 {
     signatures
         .keys()
         .map(|addr| -> Uint256 {
@@ -148,7 +148,7 @@ mod tests {
 
     pub struct TestConfig {
         pub store: MockStorage,
-        pub worker_set: WorkerSet,
+        pub worker_set: VerifierSet,
         pub session: SigningSession,
         pub signatures: HashMap<String, Signature>,
         pub key_type: KeyType,

@@ -58,8 +58,8 @@ pub enum ExecuteMsg {
     ConstructProof {
         message_ids: Vec<CrossChainId>,
     },
-    UpdateWorkerSet,
-    ConfirmWorkerSet,
+    UpdateVerifierSet,
+    ConfirmVerifierSet,
     // Updates the signing threshold. The threshold currently in use does not change.
     // The worker set must be updated and confirmed for the change to take effect.
     // Callable only by governance.
@@ -77,13 +77,8 @@ pub enum QueryMsg {
     #[returns(GetProofResponse)]
     GetProof { multisig_session_id: Uint64 },
 
-    #[returns(multisig::worker_set::WorkerSet)]
-    GetWorkerSet,
-}
-
-#[cw_serde]
-pub struct MigrateMsg {
-    pub domain_separator: Hash,
+    #[returns(multisig::verifier_set::VerifierSet)]
+    GetVerifierSet,
 }
 
 #[cw_serde]

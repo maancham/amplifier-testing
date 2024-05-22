@@ -8,13 +8,13 @@ use crate::{
     key::Signature,
     msg::{Signer, SignerWithSig},
     types::MultisigState,
-    worker_set::WorkerSet,
+    verifier_set::VerifierSet,
 };
 
 #[cw_serde]
 pub struct Multisig {
     pub state: MultisigState,
-    pub worker_set: WorkerSet,
+    pub worker_set: VerifierSet,
     pub signatures: HashMap<String, Signature>,
 }
 
@@ -56,7 +56,7 @@ mod test {
         msg::Signer,
         multisig::Multisig,
         types::MultisigState,
-        worker_set::WorkerSet,
+        verifier_set::VerifierSet,
     };
 
     #[test]
@@ -90,7 +90,7 @@ mod test {
             signers[6].with_sig(sig.clone()),
         ];
 
-        let worker_set = WorkerSet {
+        let worker_set = VerifierSet {
             signers: signers
                 .iter()
                 .map(|s| (s.address.to_string(), s.clone()))

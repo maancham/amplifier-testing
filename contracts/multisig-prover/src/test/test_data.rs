@@ -6,11 +6,11 @@ use cosmwasm_std::{Addr, HexBinary, Uint256, Uint64};
 use multisig::{
     key::{KeyType, PublicKey, Signature},
     msg::Signer,
-    worker_set::WorkerSet,
+    verifier_set::VerifierSet,
 };
 use router_api::{CrossChainId, Message};
 
-pub fn new_worker_set() -> WorkerSet {
+pub fn new_worker_set() -> VerifierSet {
     let signers = vec![
         Signer {
             address: Addr::unchecked("axelarvaloper1x86a8prx97ekkqej2x636utrdu23y8wupp9gk5"),
@@ -69,7 +69,7 @@ pub fn new_worker_set() -> WorkerSet {
         btree_signers.insert(signer.address.clone().to_string(), signer);
     }
 
-    WorkerSet {
+    VerifierSet {
         signers: btree_signers,
         threshold: Uint256::from(30u128),
         created_at: 1,
@@ -184,7 +184,7 @@ pub fn quorum() -> Uint256 {
 }
 
 // Generate a worker set matches axelar-gmp-sdk-solidity repo test data
-pub fn curr_worker_set() -> WorkerSet {
+pub fn curr_worker_set() -> VerifierSet {
     let pub_keys = vec![
         "038318535b54105d4a7aae60c08fc45f9687181b4fdfc625bd1a753fa7397fed75",
         "02ba5734d8f7091719471e7f7ed6b9df170dc70cc661ca05e688601ad984f068b0",
@@ -196,7 +196,7 @@ pub fn curr_worker_set() -> WorkerSet {
     worker_set_from_pub_keys(pub_keys)
 }
 
-pub fn worker_set_from_pub_keys(pub_keys: Vec<&str>) -> WorkerSet {
+pub fn worker_set_from_pub_keys(pub_keys: Vec<&str>) -> VerifierSet {
     let participants: Vec<(_, _)> = (0..pub_keys.len())
         .map(|i| {
             (
@@ -208,7 +208,7 @@ pub fn worker_set_from_pub_keys(pub_keys: Vec<&str>) -> WorkerSet {
             )
         })
         .collect();
-    WorkerSet::new(participants, Uint256::from_u128(3), 0)
+    VerifierSet::new(participants, Uint256::from_u128(3), 0)
 }
 
 // Domain separator matches axelar-gmp-sdk-solidity repo test data

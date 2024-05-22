@@ -9,7 +9,7 @@ use crate::{
     events::Event,
     msg::{ExecuteMsg, InstantiateMsg, QueryMsg},
     state::{
-        get_worker_set, Config, CONFIG, SIGNING_SESSIONS, SIGNING_SESSION_COUNTER, WORKER_SETS,
+        get_verifier_set, Config, CONFIG, SIGNING_SESSIONS, SIGNING_SESSION_COUNTER, VERIFIER_SETS,
     },
     types::{MsgToSign, MultisigState},
     ContractError,
@@ -70,7 +70,7 @@ pub fn execute(
             session_id,
             signature,
         } => execute::submit_signature(deps, env, info, session_id, signature),
-        ExecuteMsg::RegisterWorkerSet { worker_set } => {
+        ExecuteMsg::RegisterVerifierSet { verifier_set: worker_set } => {
             execute::register_worker_set(deps, worker_set)
         }
         ExecuteMsg::RegisterPublicKey {
@@ -93,7 +93,7 @@ pub fn execute(
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::GetMultisig { session_id } => to_binary(&query::get_multisig(deps, session_id)?),
-        QueryMsg::GetWorkerSet { worker_set_id } => {
+        QueryMsg::GetVerifierSet { verifier_set_id: worker_set_id } => {
             to_binary(&query::get_worker_set(deps, worker_set_id)?)
         }
         QueryMsg::GetPublicKey {
@@ -127,7 +127,7 @@ mod tests {
         test::common::{build_worker_set, TestSigner},
         test::common::{ecdsa_test_data, ed25519_test_data},
         types::MultisigState,
-        worker_set::WorkerSet,
+        verifier_set::VerifierSet,
     };
 
     use super::*;
@@ -154,7 +154,7 @@ mod tests {
     fn generate_worker_set(
         key_type: KeyType,
         deps: DepsMut,
-    ) -> Result<(Response, WorkerSet), axelar_wasm_std::ContractError> {
+    ) -> Result<(Response, VerifierSet), axelar_wasm_std::ContractError> {
         let info = mock_info(PROVER, &[]);
         let env = mock_env();
 
@@ -164,8 +164,8 @@ mod tests {
         };
 
         let worker_set = build_worker_set(key_type, &signers);
-        let msg = ExecuteMsg::RegisterWorkerSet {
-            worker_set: worker_set.clone(),
+        let msg = ExecuteMsg::RegisterVerifierSet {
+            verifier_set: worker_set.clone(),
         };
 
         execute(deps, env, info.clone(), msg).map(|res| (res, worker_set))
@@ -176,8 +176,8 @@ mod tests {
         query(
             deps,
             env,
-            QueryMsg::GetWorkerSet {
-                worker_set_id: worker_set_id.to_string(),
+            QueryMsg::GetVerifierSet {
+                verifier_set_id: worker_set_id.to_string(),
             },
         )
     }
@@ -387,7 +387,7 @@ mod tests {
                 .unwrap();
 
             let worker_set_id = subkey.to_string();
-            let worker_set = get_worker_set(deps.as_ref().storage, &worker_set_id).unwrap();
+            let worker_set = get_verifier_set(deps.as_ref().storage, &worker_set_id).unwrap();
             let message = match subkey {
                 _ if subkey == ecdsa_subkey => ecdsa_test_data::message(),
                 _ if subkey == ed25519_subkey => ed25519_test_data::message(),
@@ -705,7 +705,7 @@ mod tests {
             let session = SIGNING_SESSIONS
                 .load(deps.as_ref().storage, session_id.into())
                 .unwrap();
-            let worker_set = WORKER_SETS
+            let worker_set = VERIFIER_SETS
                 .load(deps.as_ref().storage, session.worker_set_id.as_str())
                 .unwrap();
             let signatures =

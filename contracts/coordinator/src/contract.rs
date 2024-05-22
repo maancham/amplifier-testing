@@ -65,7 +65,7 @@ mod tests {
     };
     use cosmwasm_std::{Addr, Empty, HexBinary, OwnedDeps, Uint256};
     use multisig::key::{KeyType, PublicKey};
-    use multisig::worker_set::WorkerSet;
+    use multisig::verifier_set::VerifierSet;
     use router_api::ChainName;
     use tofn::ecdsa::KeyPair;
 
@@ -124,7 +124,7 @@ mod tests {
         }
     }
 
-    fn create_worker_set_from_workers(workers: &Vec<Worker>, block_height: u64) -> WorkerSet {
+    fn create_worker_set_from_workers(workers: &Vec<Worker>, block_height: u64) -> VerifierSet {
         let mut pub_keys = vec![];
         for worker in workers {
             let encoded_verifying_key =
@@ -141,7 +141,7 @@ mod tests {
             })
             .collect();
 
-        WorkerSet::new(
+        VerifierSet::new(
             participants.clone().into_iter().zip(pub_keys).collect(),
             Uint256::from_u128(participants.len() as u128).mul_ceil((2u64, 3u64)),
             block_height,

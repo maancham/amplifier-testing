@@ -5,7 +5,7 @@ use signature_verifier_api::client::SignatureVerifier;
 
 use crate::signing::validate_session_signature;
 use crate::state::{load_session_signatures, save_pub_key, save_signature};
-use crate::worker_set::WorkerSet;
+use crate::verifier_set::VerifierSet;
 use crate::{
     key::{KeyTyped, PublicKey, Signature},
     signing::SigningSession,
@@ -24,7 +24,7 @@ pub fn start_signing_session(
     sig_verifier: Option<Addr>,
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
-    let worker_set = get_worker_set(deps.storage, &worker_set_id)?;
+    let worker_set = get_verifier_set(deps.storage, &worker_set_id)?;
 
     let session_id = SIGNING_SESSION_COUNTER.update(
         deps.storage,
@@ -61,7 +61,7 @@ pub fn start_signing_session(
 
     let event = Event::SigningStarted {
         session_id,
-        worker_set_id,
+        verifier_set_id: worker_set_id,
         pub_keys: worker_set.get_pub_keys(),
         msg,
         chain_name,
@@ -84,7 +84,7 @@ pub fn submit_signature(
     let mut session = SIGNING_SESSIONS
         .load(deps.storage, session_id.into())
         .map_err(|_| ContractError::SigningSessionNotFound { session_id })?;
-    let worker_set = WORKER_SETS.load(deps.storage, &session.worker_set_id)?;
+    let worker_set = VERIFIER_SETS.load(deps.storage, &session.worker_set_id)?;
 
     let pub_key = match worker_set.signers.get(&info.sender.to_string()) {
         Some(signer) => Ok(&signer.pub_key),
@@ -134,10 +134,10 @@ pub fn submit_signature(
 
 pub fn register_worker_set(
     deps: DepsMut,
-    worker_set: WorkerSet,
+    worker_set: VerifierSet,
 ) -> Result<Response, ContractError> {
     let worker_set_id = worker_set.id();
-    WORKER_SETS.save(deps.storage, &worker_set_id, &worker_set)?;
+    VERIFIER_SETS.save(deps.storage, &worker_set_id, &worker_set)?;
 
     Ok(Response::default())
 }
@@ -163,7 +163,7 @@ pub fn register_pub_key(
 
     Ok(Response::new().add_event(
         Event::PublicKeyRegistered {
-            worker: info.sender,
+            verifier: info.sender,
             public_key,
         }
         .into(),

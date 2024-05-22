@@ -1,11 +1,11 @@
 use cosmwasm_std::{to_binary, Deps, QueryRequest, StdResult, Uint64, WasmQuery};
 
-use multisig::{multisig::Multisig, types::MultisigState, worker_set::WorkerSet};
+use multisig::{multisig::Multisig, types::MultisigState, verifier_set::VerifierSet};
 
 use crate::{
     error::ContractError,
     msg::{GetProofResponse, ProofStatus},
-    state::{CONFIG, CURRENT_WORKER_SET, MULTISIG_SESSION_BATCH, PAYLOAD},
+    state::{CONFIG, CURRENT_VERIFIER_SET, MULTISIG_SESSION_BATCH, PAYLOAD},
 };
 
 pub fn get_proof(
@@ -49,6 +49,6 @@ pub fn get_proof(
     })
 }
 
-pub fn get_worker_set(deps: Deps) -> StdResult<WorkerSet> {
-    CURRENT_WORKER_SET.load(deps.storage)
+pub fn get_worker_set(deps: Deps) -> StdResult<VerifierSet> {
+    CURRENT_VERIFIER_SET.load(deps.storage)
 }

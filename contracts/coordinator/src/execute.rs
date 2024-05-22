@@ -1,6 +1,6 @@
 use cosmwasm_std::{Addr, DepsMut, MessageInfo, Response};
 
-use multisig::worker_set::WorkerSet;
+use multisig::verifier_set::VerifierSet;
 use router_api::ChainName;
 
 use crate::error::ContractError;
@@ -26,7 +26,7 @@ pub fn register_prover(
 pub fn set_active_worker_set(
     deps: DepsMut,
     info: MessageInfo,
-    next_worker_set: WorkerSet,
+    next_worker_set: VerifierSet,
 ) -> Result<Response, ContractError> {
     ACTIVE_WORKERSET_FOR_PROVER.save(deps.storage, info.sender, &(next_worker_set))?;
     Ok(Response::new())

@@ -1,12 +1,13 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Reply, Response};
+use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Empty, Env, MessageInfo, Reply, Response, StdError};
+use cw_utils::ensure_from_older_version;
 use error_stack::ResultExt;
 
 use crate::{
     error::ContractError,
     execute, migrations,
-    msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg},
+    msg::{ExecuteMsg, InstantiateMsg, QueryMsg},
     query, reply,
     state::{Config, CONFIG},
 };
@@ -73,12 +74,12 @@ pub fn execute(
 ) -> Result<Response, axelar_wasm_std::ContractError> {
     match msg {
         ExecuteMsg::ConstructProof { message_ids } => execute::construct_proof(deps, message_ids),
-        ExecuteMsg::UpdateWorkerSet {} => {
+        ExecuteMsg::UpdateVerifierSet {} => {
             execute::require_admin(&deps, info.clone())
                 .or_else(|_| execute::require_governance(&deps, info))?;
             execute::update_worker_set(deps, env)
         }
-        ExecuteMsg::ConfirmWorkerSet {} => execute::confirm_worker_set(deps, info.sender),
+        ExecuteMsg::ConfirmVerifierSet {} => execute::confirm_worker_set(deps, info.sender),
         ExecuteMsg::UpdateSigningThreshold {
             new_signing_threshold,
         } => {
@@ -116,7 +117,7 @@ pub fn query(
         QueryMsg::GetProof {
             multisig_session_id,
         } => to_binary(&query::get_proof(deps, multisig_session_id)?),
-        QueryMsg::GetWorkerSet {} => to_binary(&query::get_worker_set(deps)?),
+        QueryMsg::GetVerifierSet {} => to_binary(&query::get_worker_set(deps)?),
     }
     .change_context(ContractError::SerializeResponse)
     .map_err(axelar_wasm_std::ContractError::from)
@@ -126,13 +127,18 @@ pub fn query(
 pub fn migrate(
     deps: DepsMut,
     _env: Env,
-    msg: MigrateMsg,
+    _msg: Empty,
 ) -> Result<Response, axelar_wasm_std::ContractError> {
     // any version checks should be done before here
-
+    
+    let old_version = cw2::get_contract_version(deps.storage)?.version;
+    if old_version != "0.3.0" {
+        return Err(StdError::generic_err(format!("invalid existing contract version {}. Must be 0.3.0", old_version)).into());
+    }
     cw2::set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+    migrations::v_0_3_1::migrate_verifier_sets(deps)
 
-    migrations::v_0_3::migrate_config(deps, msg.domain_separator)
+
 }
 
 #[cfg(test)]
@@ -145,7 +151,7 @@ mod tests {
     };
 
     use axelar_wasm_std::{MajorityThreshold, Threshold, VerificationStatus};
-    use multisig::{msg::Signer, worker_set::WorkerSet};
+    use multisig::{msg::Signer, verifier_set::VerifierSet};
     use prost::Message;
     use router_api::CrossChainId;
 
@@ -204,7 +210,7 @@ mod tests {
     fn execute_update_worker_set(
         deps: DepsMut,
     ) -> Result<Response, axelar_wasm_std::ContractError> {
-        let msg = ExecuteMsg::UpdateWorkerSet {};
+        let msg = ExecuteMsg::UpdateVerifierSet {};
         execute(deps, mock_env(), mock_info(ADMIN, &[]), msg)
     }
 
@@ -212,7 +218,7 @@ mod tests {
         deps: DepsMut,
         sender: Addr,
     ) -> Result<Response, axelar_wasm_std::ContractError> {
-        let msg = ExecuteMsg::ConfirmWorkerSet {};
+        let msg = ExecuteMsg::ConfirmVerifierSet {};
         execute(deps, mock_env(), mock_info(sender.as_str(), &[]), msg)
     }
 
@@ -294,8 +300,8 @@ mod tests {
         .map(|res| from_binary(&res).unwrap())
     }
 
-    fn query_get_worker_set(deps: Deps) -> Result<WorkerSet, axelar_wasm_std::ContractError> {
-        query(deps, mock_env(), QueryMsg::GetWorkerSet {}).map(|res| from_binary(&res).unwrap())
+    fn query_get_worker_set(deps: Deps) -> Result<VerifierSet, axelar_wasm_std::ContractError> {
+        query(deps, mock_env(), QueryMsg::GetVerifierSet {}).map(|res| from_binary(&res).unwrap())
     }
 
     #[test]
@@ -387,9 +393,7 @@ mod tests {
         migrate(
             deps.as_mut(),
             mock_env(),
-            MigrateMsg {
-                domain_separator: [0; 32],
-            },
+            Empty {}
         )
         .unwrap();
 
@@ -399,12 +403,12 @@ mod tests {
     }
 
     #[allow(clippy::arithmetic_side_effects)]
-    fn test_operators_to_worker_set(operators: Vec<TestOperator>, nonce: u64) -> WorkerSet {
+    fn test_operators_to_worker_set(operators: Vec<TestOperator>, nonce: u64) -> VerifierSet {
         let total_weight: Uint256 = operators
             .iter()
             .fold(Uint256::zero(), |acc, x| acc + x.weight);
         let quorum = total_weight.mul_ceil(test_data::threshold());
-        WorkerSet {
+        VerifierSet {
             signers: operators
                 .into_iter()
                 .map(|op| {
@@ -450,7 +454,7 @@ mod tests {
             deps.as_mut(),
             mock_env(),
             mock_info("some random address", &[]),
-            ExecuteMsg::UpdateWorkerSet {},
+            ExecuteMsg::UpdateVerifierSet {},
         );
         assert!(res.is_err());
         assert_eq!(
@@ -466,7 +470,7 @@ mod tests {
             deps.as_mut(),
             mock_env(),
             mock_info(GOVERNANCE, &[]),
-            ExecuteMsg::UpdateWorkerSet {},
+            ExecuteMsg::UpdateVerifierSet {},
         );
         assert!(res.is_ok());
     }
@@ -478,7 +482,7 @@ mod tests {
             deps.as_mut(),
             mock_env(),
             mock_info(ADMIN, &[]),
-            ExecuteMsg::UpdateWorkerSet {},
+            ExecuteMsg::UpdateVerifierSet {},
         );
         assert!(res.is_ok());
     }

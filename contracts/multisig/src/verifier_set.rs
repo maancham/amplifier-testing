@@ -7,19 +7,16 @@ use cosmwasm_std::{HexBinary, Uint256};
 use sha3::{Digest, Keccak256};
 
 #[cw_serde]
-pub struct WorkerSet {
+pub struct VerifierSet {
     // An ordered map with the signer's address as the key, and the signer as the value.
     pub signers: BTreeMap<String, Signer>,
     pub threshold: Uint256,
     // for hash uniqueness. The same exact worker set could be in use at two different times,
     // and we need to be able to distinguish between the two
     pub created_at: u64,
-    // TODO: add nonce to the voting verifier and to the evm gateway.
-    // Without a nonce, updating to a worker set that is the exact same as a worker set in the past will be immediately confirmed.
-    // https://github.com/axelarnetwork/axelar-amplifier/pull/70#discussion_r1323454223
 }
 
-impl WorkerSet {
+impl VerifierSet {
     pub fn new(
         participants: Vec<(Participant, PublicKey)>,
         threshold: Uint256,
@@ -39,7 +36,7 @@ impl WorkerSet {
             })
             .collect();
 
-        WorkerSet {
+        VerifierSet {
             signers,
             threshold,
             created_at: block_height,

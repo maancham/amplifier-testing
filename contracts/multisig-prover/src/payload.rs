@@ -4,7 +4,7 @@ use sha3::{Digest, Keccak256};
 
 use axelar_wasm_std::hash::Hash;
 use multisig::msg::SignerWithSig;
-use multisig::worker_set::WorkerSet;
+use multisig::verifier_set::VerifierSet;
 use router_api::{CrossChainId, Message};
 
 use crate::{
@@ -16,7 +16,7 @@ use crate::{
 #[cw_serde]
 pub enum Payload {
     Messages(Vec<Message>),
-    WorkerSet(WorkerSet),
+    WorkerSet(VerifierSet),
 }
 
 impl Payload {
@@ -42,7 +42,7 @@ impl Payload {
         &self,
         encoder: Encoder,
         domain_separator: &Hash,
-        curr_worker_set: &WorkerSet,
+        curr_worker_set: &VerifierSet,
     ) -> Result<Hash, ContractError> {
         match encoder {
             Encoder::Abi => abi::payload_hash_to_sign(domain_separator, curr_worker_set, self),
@@ -60,7 +60,7 @@ impl Payload {
         &self,
         encoder: Encoder,
         domain_separator: &Hash,
-        worker_set: &WorkerSet,
+        worker_set: &VerifierSet,
         signers_with_sigs: Vec<SignerWithSig>,
         payload: &Payload,
     ) -> Result<HexBinary, ContractError> {

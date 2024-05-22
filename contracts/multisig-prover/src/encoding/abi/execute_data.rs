@@ -3,7 +3,7 @@ use alloy_sol_types::{sol, SolCall};
 use cosmwasm_std::HexBinary;
 
 use axelar_wasm_std::hash::Hash;
-use multisig::{key::Signature, msg::SignerWithSig, worker_set::WorkerSet};
+use multisig::{key::Signature, msg::SignerWithSig, verifier_set::VerifierSet};
 
 use crate::{
     encoding::abi::{evm_address, Message, Proof, WeightedSigners},
@@ -56,7 +56,7 @@ impl From<Message> for IAxelarAmplifierGateway::Message {
 
 impl Proof {
     /// Proof contains the entire worker set and optimized signatures. Signatures are sorted in ascending order based on the signer's address.
-    pub fn new(worker_set: &WorkerSet, mut signers_with_sigs: Vec<SignerWithSig>) -> Self {
+    pub fn new(worker_set: &VerifierSet, mut signers_with_sigs: Vec<SignerWithSig>) -> Self {
         signers_with_sigs.sort_by_key(|signer| {
             evm_address(&signer.signer.pub_key).expect("failed to convert pub key to evm address")
         });
@@ -74,7 +74,7 @@ impl Proof {
 }
 
 pub fn encode(
-    worker_set: &WorkerSet,
+    worker_set: &VerifierSet,
     signers: Vec<SignerWithSig>,
     payload_digest: &Hash,
     payload: &Payload,

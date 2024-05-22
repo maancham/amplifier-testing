@@ -2,7 +2,7 @@ use axelar_wasm_std::{Participant, Snapshot};
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{from_binary, HexBinary, StdResult};
 use cw_storage_plus::{Key, KeyDeserialize, PrimaryKey};
-use multisig::{key::PublicKey, worker_set::WorkerSet};
+use multisig::{key::PublicKey, verifier_set::VerifierSet};
 use router_api::CrossChainId;
 use sha3::{Digest, Keccak256};
 
@@ -41,7 +41,7 @@ impl KeyDeserialize for BatchId {
 }
 
 impl BatchId {
-    pub fn new(message_ids: &[CrossChainId], new_worker_set: Option<WorkerSet>) -> BatchId {
+    pub fn new(message_ids: &[CrossChainId], new_worker_set: Option<VerifierSet>) -> BatchId {
         let mut message_ids = message_ids
             .iter()
             .map(|id| id.to_string())

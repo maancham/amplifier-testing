@@ -1,6 +1,6 @@
 use axelar_wasm_std::VerificationStatus;
 use cosmwasm_std::{from_binary, to_binary, QuerierResult, WasmQuery};
-use multisig::{msg::Signer, multisig::Multisig, types::MultisigState, worker_set::WorkerSet};
+use multisig::{msg::Signer, multisig::Multisig, types::MultisigState, verifier_set::VerifierSet};
 use service_registry::state::{
     AuthorizationState, BondingState, WeightedWorker, Worker, WORKER_WEIGHT,
 };
@@ -94,7 +94,7 @@ fn mock_get_multisig(operators: Vec<TestOperator>) -> Multisig {
         })
         .collect();
 
-    let worker_set = WorkerSet {
+    let worker_set = VerifierSet {
         signers,
         threshold: quorum,
         created_at: 1,

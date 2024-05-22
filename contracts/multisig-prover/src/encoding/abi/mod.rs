@@ -9,7 +9,7 @@ use k256::{elliptic_curve::sec1::ToEncodedPoint, PublicKey};
 use sha3::{Digest, Keccak256};
 
 use axelar_wasm_std::{hash::Hash, operators::Operators};
-use multisig::{key::PublicKey as MultisigPublicKey, msg::Signer, worker_set::WorkerSet};
+use multisig::{key::PublicKey as MultisigPublicKey, msg::Signer, verifier_set::VerifierSet};
 use router_api::Message as RouterMessage;
 
 use crate::{error::ContractError, payload::Payload};
@@ -46,8 +46,8 @@ impl From<&Signer> for WeightedSigner {
     }
 }
 
-impl From<&WorkerSet> for WeightedSigners {
-    fn from(worker_set: &WorkerSet) -> Self {
+impl From<&VerifierSet> for WeightedSigners {
+    fn from(worker_set: &VerifierSet) -> Self {
         let mut signers = worker_set
             .signers
             .values()
@@ -93,7 +93,7 @@ impl TryFrom<&RouterMessage> for Message {
 
 pub fn payload_hash_to_sign(
     domain_separator: &Hash,
-    signer: &WorkerSet,
+    signer: &VerifierSet,
     payload: &Payload,
 ) -> Result<Hash, ContractError> {
     let signer_hash = WeightedSigners::from(signer).hash();
@@ -143,7 +143,7 @@ fn evm_address(pub_key: &MultisigPublicKey) -> Result<Address, ContractError> {
     }
 }
 
-pub fn make_operators(worker_set: WorkerSet) -> Operators {
+pub fn make_operators(worker_set: VerifierSet) -> Operators {
     let operators: Vec<(HexBinary, Uint256)> = worker_set
         .signers
         .values()

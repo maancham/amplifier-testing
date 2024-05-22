@@ -6,7 +6,7 @@ use cosmwasm_std::{
 };
 
 use itertools::Itertools;
-use multisig::{key::PublicKey, msg::Signer, worker_set::WorkerSet};
+use multisig::{key::PublicKey, msg::Signer, verifier_set::VerifierSet};
 
 use axelar_wasm_std::{snapshot, MajorityThreshold, VerificationStatus};
 use router_api::{ChainName, CrossChainId, Message};
@@ -17,7 +17,7 @@ use crate::{
     encoding::make_operators,
     error::ContractError,
     payload::Payload,
-    state::{Config, CONFIG, CURRENT_WORKER_SET, NEXT_WORKER_SET, PAYLOAD, REPLY_BATCH},
+    state::{Config, CONFIG, CURRENT_VERIFIER_SET, NEXT_VERIFIER_SET, PAYLOAD, REPLY_BATCH},
     types::{BatchId, WorkersInfo},
 };
 
@@ -62,7 +62,7 @@ pub fn construct_proof(
     // keep track of the payload id to use during submessage reply
     REPLY_BATCH.save(deps.storage, &payload_id)?;
 
-    let worker_set = CURRENT_WORKER_SET
+    let worker_set = CURRENT_VERIFIER_SET
         .may_load(deps.storage)?
         .ok_or(ContractError::NoWorkerSet)?;
 
@@ -150,9 +150,9 @@ fn get_workers_info(deps: &DepsMut, config: &Config) -> Result<WorkersInfo, Cont
     })
 }
 
-fn make_worker_set(deps: &DepsMut, env: &Env, config: &Config) -> Result<WorkerSet, ContractError> {
+fn make_worker_set(deps: &DepsMut, env: &Env, config: &Config) -> Result<VerifierSet, ContractError> {
     let workers_info = get_workers_info(deps, config)?;
-    Ok(WorkerSet::new(
+    Ok(VerifierSet::new(
         workers_info.pubkeys_by_participant,
         workers_info.snapshot.quorum.into(),
         env.block.height,
@@ -163,12 +163,12 @@ fn get_next_worker_set(
     deps: &DepsMut,
     env: &Env,
     config: &Config,
-) -> Result<Option<WorkerSet>, ContractError> {
+) -> Result<Option<VerifierSet>, ContractError> {
     // if there's already a pending worker set update, just return it
-    if let Some(pending_worker_set) = NEXT_WORKER_SET.may_load(deps.storage)? {
+    if let Some(pending_worker_set) = NEXT_VERIFIER_SET.may_load(deps.storage)? {
         return Ok(Some(pending_worker_set));
     }
-    let cur_worker_set = CURRENT_WORKER_SET.may_load(deps.storage)?;
+    let cur_worker_set = CURRENT_VERIFIER_SET.may_load(deps.storage)?;
     let new_worker_set = make_worker_set(deps, env, config)?;
 
     match cur_worker_set {
@@ -189,30 +189,30 @@ fn get_next_worker_set(
 
 fn save_next_worker_set(
     storage: &mut dyn Storage,
-    new_worker_set: &WorkerSet,
+    new_worker_set: &VerifierSet,
 ) -> Result<(), ContractError> {
     if different_set_in_progress(storage, new_worker_set) {
         return Err(ContractError::WorkerSetConfirmationInProgress);
     }
 
-    NEXT_WORKER_SET.save(storage, new_worker_set)?;
+    NEXT_VERIFIER_SET.save(storage, new_worker_set)?;
     Ok(())
 }
 
 pub fn update_worker_set(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
-    let cur_worker_set = CURRENT_WORKER_SET.may_load(deps.storage)?;
+    let cur_worker_set = CURRENT_VERIFIER_SET.may_load(deps.storage)?;
 
     match cur_worker_set {
         None => {
             // if no worker set, just store it and return
             let new_worker_set = make_worker_set(&deps, &env, &config)?;
-            CURRENT_WORKER_SET.save(deps.storage, &new_worker_set)?;
+            CURRENT_VERIFIER_SET.save(deps.storage, &new_worker_set)?;
 
             Ok(Response::new().add_message(wasm_execute(
                 config.multisig,
-                &multisig::msg::ExecuteMsg::RegisterWorkerSet {
-                    worker_set: new_worker_set,
+                &multisig::msg::ExecuteMsg::RegisterVerifierSet {
+                    verifier_set: new_worker_set,
                 },
                 vec![],
             )?))
@@ -247,11 +247,11 @@ pub fn update_worker_set(deps: DepsMut, env: Env) -> Result<Response, ContractEr
 }
 
 fn ensure_worker_set_verification(
-    worker_set: &WorkerSet,
+    worker_set: &VerifierSet,
     config: &Config,
     deps: &DepsMut,
 ) -> Result<(), ContractError> {
-    let query = voting_verifier::msg::QueryMsg::GetWorkerSetStatus {
+    let query = voting_verifier::msg::QueryMsg::GetVerifierSetStatus {
         new_operators: make_operators(worker_set.clone(), config.encoder),
     };
 
@@ -270,20 +270,20 @@ fn ensure_worker_set_verification(
 pub fn confirm_worker_set(deps: DepsMut, sender: Addr) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
 
-    let worker_set = NEXT_WORKER_SET.load(deps.storage)?;
+    let worker_set = NEXT_VERIFIER_SET.load(deps.storage)?;
 
     if sender != config.governance {
         ensure_worker_set_verification(&worker_set, &config, &deps)?;
     }
 
-    CURRENT_WORKER_SET.save(deps.storage, &worker_set)?;
-    NEXT_WORKER_SET.remove(deps.storage);
+    CURRENT_VERIFIER_SET.save(deps.storage, &worker_set)?;
+    NEXT_VERIFIER_SET.remove(deps.storage);
 
     Ok(Response::new()
         .add_message(wasm_execute(
             config.multisig,
-            &multisig::msg::ExecuteMsg::RegisterWorkerSet {
-                worker_set: worker_set.clone(),
+            &multisig::msg::ExecuteMsg::RegisterVerifierSet {
+                verifier_set: worker_set.clone(),
             },
             vec![],
         )?)
@@ -297,8 +297,8 @@ pub fn confirm_worker_set(deps: DepsMut, sender: Addr) -> Result<Response, Contr
 }
 
 pub fn should_update_worker_set(
-    new_workers: &WorkerSet,
-    cur_workers: &WorkerSet,
+    new_workers: &VerifierSet,
+    cur_workers: &VerifierSet,
     max_diff: usize,
 ) -> bool {
     new_workers.threshold != cur_workers.threshold
@@ -318,8 +318,8 @@ fn signers_difference_count(s1: &BTreeMap<String, Signer>, s2: &BTreeMap<String,
 
 // Returns true if there is a different worker set pending for confirmation, false if there is no
 // worker set pending or if the pending set is the same
-fn different_set_in_progress(storage: &dyn Storage, new_worker_set: &WorkerSet) -> bool {
-    if let Ok(Some(next_worker_set)) = NEXT_WORKER_SET.may_load(storage) {
+fn different_set_in_progress(storage: &dyn Storage, new_worker_set: &VerifierSet) -> bool {
+    if let Ok(Some(next_worker_set)) = NEXT_VERIFIER_SET.may_load(storage) {
         return next_worker_set != *new_worker_set;
     }
 
@@ -362,7 +362,7 @@ mod tests {
 
     use crate::{
         execute::should_update_worker_set,
-        state::{Config, NEXT_WORKER_SET},
+        state::{Config, NEXT_VERIFIER_SET},
         test::test_data,
     };
     use std::collections::BTreeMap;
@@ -427,7 +427,7 @@ mod tests {
         let mut deps = mock_dependencies();
         let mut new_worker_set = test_data::new_worker_set();
 
-        NEXT_WORKER_SET
+        NEXT_VERIFIER_SET
             .save(deps.as_mut().storage, &new_worker_set)
             .unwrap();
 
@@ -444,7 +444,7 @@ mod tests {
         let mut deps = mock_dependencies();
         let mut new_worker_set = test_data::new_worker_set();
 
-        NEXT_WORKER_SET
+        NEXT_VERIFIER_SET
             .save(deps.as_mut().storage, &new_worker_set)
             .unwrap();
 
@@ -461,7 +461,7 @@ mod tests {
         let mut deps = mock_dependencies();
         let env = mock_env();
         let new_worker_set = test_data::new_worker_set();
-        NEXT_WORKER_SET
+        NEXT_VERIFIER_SET
             .save(deps.as_mut().storage, &new_worker_set)
             .unwrap();
         let ret_worker_set = get_next_worker_set(&deps.as_mut(), &env, &mock_config());
