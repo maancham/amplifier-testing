@@ -1,17 +1,28 @@
 name: Upload ampd contracts to Cloudflare R2 bucket
+#
+#on:
+#  push:
+#    branches:
+#      - main
+#  workflow_dispatch:
+#    inputs:
+#      branch:
+#        description: Github branch to checkout for compilation
+#        required: true
+#        default: main
+#        type: string
+#      commit-hash:
+#        description: Commit hash to checkout
+#        required: false
+#        default: ""
+#        type: string
 
 on:
   push:
+    paths:
+      - '**.yml'
     branches:
-      - main
-  workflow_dispatch:
-    inputs:
-      branch:
-        description: Github branch to checkout for compilation
-        required: true
-        default: main
-        type: string
-
+      - feat/add-commit-hash-support-to-r2-action
 
 jobs:
   compile-and-upload:
@@ -22,15 +33,12 @@ jobs:
       packages: write
       id-token: write
     steps:
-      - name: Determine branch
-        id: get-branch-name
+      - name: Determine branch and commit hash
+        id: get-branch-and-commit
         run: |
-          if [ "${{ github.event_name }}" == "push" ]; then
-            branch="main"
-          else
-            branch="${{ inputs.branch }}"
-          fi
-          echo "branch=$branch" >> $GITHUB_OUTPUT
+          commit_hash="dca7ffd"
+          echo "branch=main" >> $GITHUB_OUTPUT
+          echo "commit_hash=$commit_hash" >> $GITHUB_OUTPUT
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -38,7 +46,12 @@ jobs:
           fetch-depth: "0"
           path: axelar-amplifier
           submodules: recursive
-          ref: ${{ steps.get-branch-name.outputs.branch }}
+          ref: ${{ steps.get-branch-and-commit.outputs.branch }}
+
+      - name: Checkout specific commit if provided
+        run: |
+          cd axelar-amplifier
+          git checkout ${{ steps.get-branch-and-commit.outputs.commit_hash }}
 
       - name: Compile amplifier contracts
         id: compile-contracts
