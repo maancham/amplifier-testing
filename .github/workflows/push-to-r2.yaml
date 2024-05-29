@@ -1,4 +1,4 @@
-name: Upload ampd contracts to Cloudflare R2 bucket
+name: temporary R2 bucket upload
 #
 #on:
 #  push:
