@@ -19,8 +19,6 @@ name: temporary R2 bucket upload
 
 on:
   push:
-    paths:
-      - '**.yml'
     branches:
       - feat/add-commit-hash-support-to-r2-action
 
