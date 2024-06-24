@@ -167,8 +167,8 @@ pub fn verify_messages(
 
 fn get_poll_results(poll: &Poll) -> PollResults {
     match poll {
-        Poll::Messages(weighted_poll) => weighted_poll.state().results,
-        Poll::ConfirmVerifierSet(weighted_poll) => weighted_poll.state().results,
+        Poll::Messages(weighted_poll) => weighted_poll.results(),
+        Poll::ConfirmVerifierSet(weighted_poll) => weighted_poll.results(),
     }
 }
 

@@ -309,6 +309,16 @@ impl WeightedPoll {
         Ok(self)
     }
 
+    pub fn results(&self) -> PollResults {
+
+        let quorum: Uint128 = self.quorum.into();
+        PollResults(self
+            .tallies
+            .iter()
+            .map(|tallies| tallies.consensus(quorum))
+            .collect())
+    }
+
     pub fn state(&self) -> PollState {
         let quorum: Uint128 = self.quorum.into();
         let results: Vec<Option<Vote>> = self
