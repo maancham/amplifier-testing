@@ -34,8 +34,8 @@ jobs:
       - name: Determine branch and commit hash
         id: get-branch-and-commit
         run: |
-          commit_hash="6d6b974"
-          echo "branch=main" >> $GITHUB_OUTPUT
+          commit_hash="ce7ab9f"
+          echo "branch=fix/coordinator_contract_address" >> $GITHUB_OUTPUT
           echo "commit_hash=$commit_hash" >> $GITHUB_OUTPUT
 
       - name: Checkout code
