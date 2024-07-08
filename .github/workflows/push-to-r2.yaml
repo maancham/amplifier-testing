@@ -34,8 +34,8 @@ jobs:
       - name: Determine branch and commit hash
         id: get-branch-and-commit
         run: |
-          commit_hash="afaf1bc"
-          echo "branch=multisig-v0.4.1" >> $GITHUB_OUTPUT
+          commit_hash="1ebaae763d2f78bae7f0cfc7efb7591a9885e3c9"
+          echo "branch=main" >> $GITHUB_OUTPUT
           echo "commit_hash=$commit_hash" >> $GITHUB_OUTPUT
 
       - name: Checkout code
