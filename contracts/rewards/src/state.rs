@@ -230,6 +230,7 @@ impl Epoch {
 pub struct RewardsPool {
     pub id: PoolId,
     pub balance: Uint128,
+    pub params: ParamsSnapshot,
 }
 
 impl RewardsPool {
@@ -249,9 +250,6 @@ impl RewardsPool {
         Ok(self)
     }
 }
-
-/// Current rewards parameters, along with when the params were updated
-pub const PARAMS: Item<ParamsSnapshot> = Item::new("params");
 
 /// Maps a (pool id, epoch number) pair to a tally for that epoch and rewards pool
 const TALLIES: Map<TallyId, EpochTally> = Map::new("tallies");
