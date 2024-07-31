@@ -31,6 +31,9 @@ pub enum ContractError {
     #[error("rewards pool not found")]
     RewardsPoolNotFound,
 
+    #[error("rewards pool already exists")]
+    RewardsPoolAlreadyExists,
+
     #[error("error loading rewards watermark")]
     LoadRewardsWatermark,
 

@@ -44,13 +44,13 @@ pub const CONFIG: Item<Config> = Item::new("config");
 #[cfg(test)]
 pub mod tests {
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{DepsMut, Env, MessageInfo, Response};
+    use cosmwasm_std::{Addr, DepsMut, Env, MessageInfo, Response};
 
     use crate::contract::migrations::v0_4_0;
     use crate::contract::{execute, CONTRACT_NAME};
     use crate::msg::{ExecuteMsg, InstantiateMsg, Params};
-    use crate::state;
-    use crate::state::{Epoch, ParamsSnapshot, PARAMS};
+    use crate::state::{self, PoolId};
+    use crate::state::{Epoch, ParamsSnapshot};
 
     #[deprecated(since = "0.4.0", note = "only used during migration tests")]
     fn instantiate(
@@ -71,16 +71,6 @@ pub mod tests {
             },
         )?;
 
-        PARAMS.save(
-            deps.storage,
-            &ParamsSnapshot {
-                params: msg.params,
-                created_at: Epoch {
-                    epoch_num: 0,
-                    block_height_started: env.block.height,
-                },
-            },
-        )?;
 
         Ok(Response::new())
     }
@@ -125,6 +115,7 @@ pub mod tests {
                 rewards_per_epoch: 1000u128.try_into().unwrap(),
                 participation_threshold: (1, 2).try_into().unwrap(),
             },
+            pool_id: PoolId{chain_name: "mock-chain".parse().unwrap(), contract: Addr::unchecked("some contract")}
         };
         assert!(execute(
             deps.as_mut(),

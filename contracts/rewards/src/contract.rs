@@ -10,7 +10,7 @@ use itertools::Itertools;
 use crate::contract::migrations::v0_4_0;
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
-use crate::state::{self, Config, Epoch, ParamsSnapshot, PoolId, CONFIG, PARAMS};
+use crate::state::{self, Config, Epoch, ParamsSnapshot, PoolId, CONFIG};
 
 mod execute;
 mod migrations;
@@ -50,17 +50,6 @@ pub fn instantiate(
         deps.storage,
         &Config {
             rewards_denom: msg.rewards_denom,
-        },
-    )?;
-
-    PARAMS.save(
-        deps.storage,
-        &ParamsSnapshot {
-            params: msg.params,
-            created_at: Epoch {
-                epoch_num: 0,
-                block_height_started: env.block.height,
-            },
         },
     )?;
 
@@ -136,9 +125,13 @@ pub fn execute(
 
             Ok(Response::new().add_messages(msgs))
         }
-        ExecuteMsg::UpdateParams { params } => {
-            execute::update_params(deps.storage, params, env.block.height)?;
+        ExecuteMsg::UpdateParams { params, pool_id} => {
+            execute::update_params(deps.storage, params, env.block.height, &pool_id)?;
 
+            Ok(Response::new())
+        }
+        ExecuteMsg::CreatePool { params, pool_id } => {
+            execute::create_pool(deps.storage, params, env.block.height, &pool_id)?;
             Ok(Response::new())
         }
     }
@@ -236,6 +229,17 @@ mod tests {
             contract: pool_contract.clone(),
         };
 
+        let res = app.execute_contract(
+            governance_address.clone(),
+            contract_address.clone(),
+            &ExecuteMsg::CreatePool {
+                params: initial_params.clone(),
+                pool_id: pool_id.clone()
+            },
+            &[],
+        );
+        assert!(res.is_ok());
+
         let rewards = 200;
         let res = app.execute_contract(
             user.clone(),
@@ -256,6 +260,7 @@ mod tests {
             contract_address.clone(),
             &ExecuteMsg::UpdateParams {
                 params: updated_params.clone(),
+                pool_id: pool_id.clone()
             },
             &[],
         );

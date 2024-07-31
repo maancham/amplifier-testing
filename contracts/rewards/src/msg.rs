@@ -64,12 +64,11 @@ pub enum ExecuteMsg {
 
     /// Overwrites the currently stored params. Callable only by governance.
     #[permission(Governance)]
-    UpdateParams { params: Params },
+    UpdateParams { params: Params, pool_id: PoolId },
 
-    /// 
+    /// Overwrites the currently stored params. Callable only by governance.
     #[permission(Governance)]
-    CreatePool { params: Params },
-
+    CreatePool { params: Params, pool_id: PoolId },
 }
 
 #[cw_serde]
