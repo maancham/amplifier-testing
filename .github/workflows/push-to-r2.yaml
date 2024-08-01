@@ -1,26 +1,19 @@
 name: temporary R2 bucket upload
-#
-#on:
-#  push:
-#    branches:
-#      - main
-#  workflow_dispatch:
-#    inputs:
-#      branch:
-#        description: Github branch to checkout for compilation
-#        required: true
-#        default: main
-#        type: string
-#      commit-hash:
-#        description: Commit hash to checkout
-#        required: false
-#        default: ""
-#        type: string
 
 on:
   push:
     branches:
       - feat/add-commit-hash-support-to-r2-action
+    tags:
+      - '*-v[0-9]+.[0-9]+.[0-9]+'
+#  workflow_dispatch:
+#    inputs:
+#      ref:
+#        description: Github branch or tag to checkout for compilation
+#        required: true
+#        default: main
+#        type: string
+
 
 jobs:
   compile-and-upload:
@@ -31,12 +24,43 @@ jobs:
       packages: write
       id-token: write
     steps:
-      - name: Determine branch and commit hash
-        id: get-branch-and-commit
+      - name: Get tag
+        id: get-tag
         run: |
-          commit_hash="1ebaae763d2f78bae7f0cfc7efb7591a9885e3c9"
-          echo "branch=main" >> $GITHUB_OUTPUT
-          echo "commit_hash=$commit_hash" >> $GITHUB_OUTPUT
+          echo "tag=ampd-v1.0.0"
+          echo "tag=ampd-v1.0.0" >> $GITHUB_OUTPUT
+
+
+      - name: Check for release information from tag
+        id: check-release
+        run: |
+          tag="${{ steps.get-tag.outputs.tag }}"
+          is_release="false"
+
+          if [[ $tag =~ ^([a-zA-Z-]+)-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            is_release="true"
+            crate_name="${BASH_REMATCH[1]}"
+            crate_version="${BASH_REMATCH[2]}"
+
+            echo "Is release: $is_release"
+            echo "Crate Name: $crate_name"
+            echo "Crate Version: $crate_version"
+
+            echo "is-release=$is_release" >> $GITHUB_OUTPUT
+            echo "crate-name=$crate_name" >> $GITHUB_OUTPUT
+            echo "crate-version=$crate_version" >> $GITHUB_OUTPUT
+          else
+            echo "Is release: $is_release"
+            echo "Not a release tag. Skipping crate name and version extraction."
+            echo "is-release=$is_release" >> $GITHUB_OUTPUT
+          fi
+
+
+      - name: Determine checkout ref
+        id: get-checkout-ref
+        run: |
+          echo "ref=${{ steps.get-tag.outputs.tag }}" >> $GITHUB_OUTPUT
+
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -44,14 +68,18 @@ jobs:
           fetch-depth: "0"
           path: axelar-amplifier
           submodules: recursive
-          ref: ${{ steps.get-branch-and-commit.outputs.branch }}
+          ref: ${{ steps.get-checkout-ref.outputs.ref }}
 
-      - name: Checkout specific commit if provided
-        run: |
-          cd axelar-amplifier
-          git checkout ${{ steps.get-branch-and-commit.outputs.commit_hash }}
 
-      - name: Compile amplifier contracts
+      - name: Import GPG key
+        id: import_gpg
+        uses: crazy-max/ghaction-import-gpg@v4
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+
+      - name: Compile all amplifier contracts
         id: compile-contracts
         run: |
           cd axelar-amplifier
@@ -66,7 +94,46 @@ jobs:
           cp -R axelar-amplifier/artifacts/* ./artifacts/$commit_hash/
           echo "wasm-directory=./artifacts" >> $GITHUB_OUTPUT
 
+
+      - name: Prepare and sign release artifacts
+        if: steps.check-release.outputs.is-release == 'true'
+        id: prepare-release
+        run: |
+          cd ${{ steps.compile-contracts.outputs.wasm-directory }}
+          crate_name="${{ steps.check-release.outputs.crate-name }}"
+          crate_version="${{ steps.check-release.outputs.crate-version }}"
+          wasm_file=$(find . -name "${crate_name//-/_}.wasm")
+          checksum_file=$(find . -name "checksums.txt")
+
+          if [ -z "$wasm_file" ]; then
+            echo "Error: Could not find .wasm file for $crate_name"
+            exit 1
+          fi
+
+          mkdir -p "../release-artifacts"
+          cp "$wasm_file" "../release-artifacts/${crate_name}.wasm"
+          cp "$checksum_file" "../release-artifacts/"
+
+          gpg --armor --detach-sign  ../release-artifacts/${crate_name}.wasm
+          gpg --armor --detach-sign  ../release-artifacts/checksums.txt
+
+          echo "release-artifacts-dir=./release-artifacts" >> $GITHUB_OUTPUT
+          echo "r2-destination-dir=./releases/amplifier/${crate_name}/${crate_version}" >> $GITHUB_OUTPUT
+
+
       - uses: ryand56/r2-upload-action@latest
+        if: steps.check-release.outputs.is-release == 'true'
+        with:
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_CF }}
+          r2-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_CF }}
+          r2-bucket: ${{ secrets.R2_BUCKET }}
+          source-dir: ${{ steps.prepare-release.outputs.release-artifacts-dir }}
+          destination-dir: ${{ steps.prepare-release.outputs.r2-destination-dir }}
+
+
+      - uses: ryand56/r2-upload-action@latest
+        if: steps.check-release.outputs.is-release != 'true'
         with:
           r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
           r2-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_CF }}
