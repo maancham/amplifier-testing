@@ -27,7 +27,7 @@ jobs:
       - name: Get tag
         id: get-tag
         run: |
-          echo "tag=gateway-v1.0.0" >> $GITHUB_OUTPUT
+          echo "tag=multisig-prover-v1.0.0" >> $GITHUB_OUTPUT
 
 
       - name: Check for release information from tag
