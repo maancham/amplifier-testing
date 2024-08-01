@@ -26,6 +26,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Trigger existing workflow
-        uses: ./.github/workflows/push-to-r2.yaml
+        uses: ./axelar-amplifier/.github/workflows/push-to-r2.yaml
         with:
           tag: ${{ matrix.tag }}
