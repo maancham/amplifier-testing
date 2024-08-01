@@ -30,6 +30,6 @@ jobs:
           ls -la
 
       - name: Trigger existing workflow
-        uses: .github/workflows/push-to-r2.yaml
+        uses: /.github/workflows/push-to-r2.yaml
         with:
           tag: ${{ matrix.tag }}
