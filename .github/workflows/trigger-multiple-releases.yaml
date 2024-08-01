@@ -22,14 +22,14 @@ jobs:
           'coordinator-v1.0.0'
         ]
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: check path
-        run: |
-          ls -la
+#      - name: Checkout code
+#        uses: actions/checkout@v4
+#
+#      - name: check path
+#        run: |
+#          ls -la
 
       - name: Trigger existing workflow
-        uses: /.github/workflows/push-to-r2.yaml
+        uses: ./.github/workflows/push-to-r2.yaml
         with:
           tag: ${{ matrix.tag }}
