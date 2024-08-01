@@ -125,7 +125,7 @@ pub fn execute(
 
             Ok(Response::new().add_messages(msgs))
         }
-        ExecuteMsg::UpdateParams { params, pool_id} => {
+        ExecuteMsg::UpdateParams { params, pool_id } => {
             execute::update_params(deps.storage, params, env.block.height, &pool_id)?;
 
             Ok(Response::new())
@@ -234,7 +234,7 @@ mod tests {
             contract_address.clone(),
             &ExecuteMsg::CreatePool {
                 params: initial_params.clone(),
-                pool_id: pool_id.clone()
+                pool_id: pool_id.clone(),
             },
             &[],
         );
@@ -260,7 +260,7 @@ mod tests {
             contract_address.clone(),
             &ExecuteMsg::UpdateParams {
                 params: updated_params.clone(),
-                pool_id: pool_id.clone()
+                pool_id: pool_id.clone(),
             },
             &[],
         );

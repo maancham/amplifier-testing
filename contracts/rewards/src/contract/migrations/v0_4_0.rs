@@ -49,8 +49,7 @@ pub mod tests {
     use crate::contract::migrations::v0_4_0;
     use crate::contract::{execute, CONTRACT_NAME};
     use crate::msg::{ExecuteMsg, InstantiateMsg, Params};
-    use crate::state::{self, PoolId};
-    use crate::state::{Epoch, ParamsSnapshot};
+    use crate::state::{self, Epoch, ParamsSnapshot, PoolId};
 
     #[deprecated(since = "0.4.0", note = "only used during migration tests")]
     fn instantiate(
@@ -70,7 +69,6 @@ pub mod tests {
                 rewards_denom: msg.rewards_denom,
             },
         )?;
-
 
         Ok(Response::new())
     }
@@ -109,13 +107,16 @@ pub mod tests {
 
         v0_4_0::migrate(&mut deps.storage).unwrap();
 
-        let msg = ExecuteMsg::UpdateParams {
+        let msg = ExecuteMsg::CreatePool {
             params: Params {
                 epoch_duration: 100u64.try_into().unwrap(),
                 rewards_per_epoch: 1000u128.try_into().unwrap(),
                 participation_threshold: (1, 2).try_into().unwrap(),
             },
-            pool_id: PoolId{chain_name: "mock-chain".parse().unwrap(), contract: Addr::unchecked("some contract")}
+            pool_id: PoolId {
+                chain_name: "mock-chain".parse().unwrap(),
+                contract: Addr::unchecked("some contract"),
+            },
         };
         assert!(execute(
             deps.as_mut(),

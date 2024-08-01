@@ -309,7 +309,6 @@ pub(crate) fn may_load_rewards_pool(
         .change_context(ContractError::LoadRewardsPool)
 }
 
-
 pub(crate) fn load_rewards_pool(
     storage: &dyn Storage,
     pool_id: PoolId,
@@ -681,10 +680,10 @@ mod test {
         let mut mock_deps = mock_dependencies();
 
         let chain_name: ChainName = "mock-chain".parse().unwrap();
-        let pool = RewardsPool::new(PoolId::new(
-            chain_name.clone(),
-            Addr::unchecked("some contract"),
-        ), params);
+        let pool = RewardsPool::new(
+            PoolId::new(chain_name.clone(), Addr::unchecked("some contract")),
+            params,
+        );
         let res = save_rewards_pool(mock_deps.as_mut().storage, &pool);
         assert!(res.is_ok());
 
@@ -692,6 +691,5 @@ mod test {
 
         assert!(loaded.is_ok());
         assert_eq!(loaded.unwrap(), pool);
-
     }
 }

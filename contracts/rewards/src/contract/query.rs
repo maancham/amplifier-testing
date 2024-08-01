@@ -94,7 +94,7 @@ mod tests {
         let rewards_pool = RewardsPool {
             id: pool_id.clone(),
             balance: initial_balance,
-            params: params_snapshot.clone()
+            params: params_snapshot.clone(),
         };
 
         state::save_rewards_pool(storage, &rewards_pool).unwrap();
