@@ -1,18 +1,12 @@
 name: temporary R2 bucket upload
 
 on:
-  push:
-    branches:
-      - feat/add-commit-hash-support-to-r2-action
-    tags:
-      - '*-v[0-9]+.[0-9]+.[0-9]+'
-#  workflow_dispatch:
-#    inputs:
-#      ref:
-#        description: Github branch or tag to checkout for compilation
-#        required: true
-#        default: main
-#        type: string
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag to build and release'
+        required: true
+        type: string
 
 
 jobs:
@@ -27,8 +21,8 @@ jobs:
       - name: Get tag
         id: get-tag
         run: |
-          echo "tag=ampd-v1.0.0"
-          echo "tag=ampd-v1.0.0" >> $GITHUB_OUTPUT
+          echo "tag=${{ inputs.tag }}"
+          echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
 
 
       - name: Check for release information from tag

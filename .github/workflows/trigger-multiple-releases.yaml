@@ -1,0 +1,31 @@
+name: Trigger Multiple Releases
+
+on:
+  push:
+    branches:
+      - feat/add-commit-hash-support-to-r2-action
+
+jobs:
+  trigger-releases:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        tag: [
+          'voting-verifier-v1.0.0',
+          'service-registry-v1.0.0',
+          'router-v1.0.0',
+          'rewards-v1.0.0',
+          'nexus-gateway-v1.0.0',
+          'multisig-v1.0.0',
+          'multisig-prover-v1.0.0',
+          'gateway-v1.0.0',
+          'coordinator-v1.0.0'
+        ]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Trigger existing workflow
+        uses: ./.github/workflows/push-to-r2.yaml
+        with:
+          tag: ${{ matrix.tag }}
