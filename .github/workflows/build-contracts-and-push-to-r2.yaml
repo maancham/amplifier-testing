@@ -92,12 +92,12 @@ jobs:
           ref: ${{ steps.get-checkout-ref.outputs.ref }}
 
 
-      - name: Import GPG key
-        id: import_gpg
-        uses: crazy-max/ghaction-import-gpg@v4
-        with:
-          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
-          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+#      - name: Import GPG key
+#        id: import_gpg
+#        uses: crazy-max/ghaction-import-gpg@v4
+#        with:
+#          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+#          passphrase: ${{ secrets.GPG_PASSPHRASE }}
 
 
       - name: Compile all amplifier contracts
@@ -134,9 +134,6 @@ jobs:
           mkdir -p "../${crate_version}"
           cp "$wasm_file" "../${crate_version}/${crate_name}.wasm"
           cp "$checksum_file" "../${crate_version}/"
-
-          gpg --armor --detach-sign  ../${crate_version}/${crate_name}.wasm
-          gpg --armor --detach-sign  ../${crate_version}/checksums.txt
 
           echo "release-artifacts-dir=./${crate_version}" >> $GITHUB_OUTPUT
           echo "r2-destination-dir=./releases/cosmwasm/${crate_name}" >> $GITHUB_OUTPUT

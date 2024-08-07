@@ -68,3 +68,4 @@ jobs:
           major-pattern: ${{ steps.setup-variables.outputs.major-pattern }}
           minor-pattern: ${{ steps.setup-variables.outputs.minor-pattern }}
           change-path: ${{ steps.setup-variables.outputs.change-path }}
+          github_token: ${{ secrets.PA_ACTION_TOKEN }}

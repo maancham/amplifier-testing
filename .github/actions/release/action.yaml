@@ -16,6 +16,9 @@ inputs:
     description: "minor pattern match string"
   change-path:
     description: "paths to observe for changes"
+  github_token:
+    description: "GitHub token for pushing changes"
+    required: true
 
 runs:
   using: "composite"
@@ -155,10 +158,13 @@ runs:
       if:
         inputs.dry-run == 'false' &&
         steps.semantic-version.outputs.changed == 'true'
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         git config --global user.email "devops@axelar.network"
         git config --global user.name "Axelar DevOps"
         cargo release -x \
           --no-confirm \
+          --token $GITHUB_TOKEN \
           -p ${{ inputs.binary-to-release }} \
           ${{ steps.semantic-version.outputs.version_type }}
