@@ -91,6 +91,7 @@ jobs:
           path: axelar-amplifier
           submodules: recursive
           ref: ${{ steps.get-checkout-ref.outputs.ref }}
+          token: ${{ secrets.PA_ACTION_TOKEN }}
 
 
       - name: Compile all amplifier contracts
