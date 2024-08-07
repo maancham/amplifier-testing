@@ -2,6 +2,9 @@ name: Amplifier wasm contracts - Upload wasm binaries to Cloudflare R2 bucket
 
 on:
   push:
+    branches:
+      - main
+  create:
     tags:
       - '*-v[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
