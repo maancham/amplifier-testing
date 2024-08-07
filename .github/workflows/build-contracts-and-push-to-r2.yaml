@@ -92,14 +92,6 @@ jobs:
           ref: ${{ steps.get-checkout-ref.outputs.ref }}
 
 
-#      - name: Import GPG key
-#        id: import_gpg
-#        uses: crazy-max/ghaction-import-gpg@v4
-#        with:
-#          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
-#          passphrase: ${{ secrets.GPG_PASSPHRASE }}
-
-
       - name: Compile all amplifier contracts
         id: compile-contracts
         run: |
