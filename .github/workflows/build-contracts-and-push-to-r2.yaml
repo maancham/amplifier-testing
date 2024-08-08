@@ -57,7 +57,12 @@ jobs:
             is_release="true"
             crate_name="${BASH_REMATCH[1]}"
             crate_version="${BASH_REMATCH[2]}"
-
+            
+            if [[ $crate_name == "ampd" ]]; then
+              echo "Ampd release. Ignoring the wasm build."
+              exit 0
+            fi
+            
             echo "Is release: $is_release"
             echo "Crate Name: $crate_name"
             echo "Crate Version: $crate_version"
