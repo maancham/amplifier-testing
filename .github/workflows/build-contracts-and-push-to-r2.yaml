@@ -59,8 +59,8 @@ jobs:
             crate_version="${BASH_REMATCH[2]}"
             
             if [[ $crate_name == "ampd" ]]; then
-              echo "Ampd release. Ignoring the wasm build."
-              exit 0
+              echo "Ampd release. Ignoring the wasm build and upload."
+              exit 1
             fi
             
             echo "Is release: $is_release"
@@ -138,15 +138,15 @@ jobs:
           echo "r2-destination-dir=./releases/cosmwasm/${crate_name}" >> $GITHUB_OUTPUT
 
 
-#      - uses: ryand56/r2-upload-action@latest
-#        if: steps.check-release.outputs.is-release == 'true'
-#        with:
-#          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
-#          r2-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_CF }}
-#          r2-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_CF }}
-#          r2-bucket: ${{ secrets.R2_BUCKET }}
-#          source-dir: ${{ steps.prepare-release.outputs.release-artifacts-dir }}
-#          destination-dir: ${{ steps.prepare-release.outputs.r2-destination-dir }}
+      - uses: ryand56/r2-upload-action@latest
+        if: steps.check-release.outputs.is-release == 'true'
+        with:
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_CF }}
+          r2-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_CF }}
+          r2-bucket: ${{ secrets.R2_BUCKET }}
+          source-dir: ${{ steps.prepare-release.outputs.release-artifacts-dir }}
+          destination-dir: ${{ steps.prepare-release.outputs.r2-destination-dir }}
 #
 #
 #      - uses: ryand56/r2-upload-action@latest
