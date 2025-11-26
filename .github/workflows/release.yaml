@@ -37,7 +37,7 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
-          token: ${{ secrets.INTEROP_CI_ACTION_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Setup variables for sub-project to release
         id: setup-variables
@@ -82,7 +82,7 @@ jobs:
           major-pattern: ${{ steps.setup-variables.outputs.major-pattern }}
           minor-pattern: ${{ steps.setup-variables.outputs.minor-pattern }}
           change-path: ${{ steps.setup-variables.outputs.change-path }}
-          github_token: ${{ secrets.INTEROP_CI_ACTION_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create individual handler tags for ampd-handlers
         if: ${{ github.event.inputs.binary-to-release == 'ampd-handlers' && github.event.inputs.dry-run == 'false' }}
