@@ -75,6 +75,13 @@ runs:
         echo "PREVIOUS-VERSION:
           ${{ steps.semantic-version.outputs.previous_version }}"
 
+    - name: Configure git for releases
+      shell: bash
+      if: inputs.dry-run == 'false' && steps.semantic-version.outputs.changed == 'true'
+      run: |
+        git config --global user.email "devops@interoplabs.io"
+        git config --global user.name "Interop Labs CI"
+
     - name: Check if tag already exists (possible collision with an orphaned
         commit tagged as patch)
       id: validate-tag
@@ -236,8 +243,6 @@ runs:
         inputs.dry-run == 'false' &&
         steps.semantic-version.outputs.changed == 'true'
       run: |
-        git config --global user.email "devops@interoplabs.io"
-        git config --global user.name "Interop Labs CI"
         cargo release -x \
           --no-confirm \
           --no-push \
@@ -263,9 +268,6 @@ runs:
         commit_sha=$(git rev-parse "$version_tag")
         
         echo "Creating individual handler tags for version $version at commit $commit_sha"
-        
-        git config --global user.email "devops@interoplabs.io"
-        git config --global user.name "Interop Labs CI"
         
         if [ -d "ampd-handlers/src/bin" ]; then
           handlers=$(ls -d ampd-handlers/src/bin/*/ 2>/dev/null | xargs -n1 basename)
