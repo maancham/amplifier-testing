@@ -92,5 +92,5 @@ jobs:
           major-pattern: ${{ steps.setup-variables.outputs.major-pattern }}
           minor-pattern: ${{ steps.setup-variables.outputs.minor-pattern }}
           change-path: ${{ steps.setup-variables.outputs.change-path }}
-          github_token: ${{ secrets.INTEROP_CI_ACTION_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           tag-prefixes: ${{ steps.setup-variables.outputs.tag-prefixes }}
